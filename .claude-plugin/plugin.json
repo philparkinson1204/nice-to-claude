@@ -1,0 +1,7 @@
+{
+  "name": "niceties",
+  "description": "A /stats-style dashboard of how often you say please & thank you to Claude. Context-aware (quoted text, UI copy, pasted emails and meta-talk don't count), with a tiny statusline counter and milestone confetti.",
+  "version": "1.0.0",
+  "author": { "name": "Phil Parkinson" },
+  "keywords": ["stats", "fun", "politeness", "statusline", "dashboard"]
+}
