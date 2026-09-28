@@ -728,7 +728,7 @@ def audit(which: str, n: int, color: bool) -> str:
                 continue
             t = r["text"]
             a, b = max(0, h["s"] - 45), min(len(t), h["e"] + 45)
-            snip = (("…" if a else "") + t[a:h["s"]] + (P.o(t[h["s"]:h["e"]]) if not h["why"] else P.v(t[h["s"]:h["e"]]))
+            snip = (("…" if a else "") + t[a:h["s"]] + ((P.o(t[h["s"]:h["e"]]) if not h["why"] else P.v(t[h["s"]:h["e"]])) if P.on else f"[{t[h['s']:h['e']]}]")
                     + t[h["e"]:b] + ("…" if b < len(t) else "")).replace("\n", " ⏎ ")
             tag = P.o("✓ counted      ") if not h["why"] else P.d(f"✗ {REASON_LABEL[h['why']]:<13}")
             out.append(f"  {tag} {P.d(r['day'].isoformat())}  {snip}")
