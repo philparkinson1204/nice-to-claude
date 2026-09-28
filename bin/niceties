@@ -20,7 +20,7 @@ import re
 import sys
 from collections import Counter, defaultdict
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 HISTORY = os.path.expanduser(os.environ.get("NICETIES_HISTORY", "~/.claude/history.jsonl"))
 CACHE_DIR = os.path.expanduser(os.environ.get("NICETIES_CACHE", "~/.cache/claude-niceties"))
 

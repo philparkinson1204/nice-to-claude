@@ -6,7 +6,7 @@
       "name": "niceties",
       "source": "./",
       "description": "A /stats-style dashboard of how often you say please & thank you to Claude.",
-      "version": "1.0.0"
+      "version": "1.0.1"
     }
   ]
 }
