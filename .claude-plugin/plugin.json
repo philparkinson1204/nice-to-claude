@@ -1,7 +1,15 @@
 {
   "name": "niceties",
-  "description": "A /stats-style dashboard of how often you say please & thank you to Claude. Context-aware (quoted text, UI copy, pasted emails and meta-talk don't count), with a tiny statusline counter and milestone confetti.",
-  "version": "1.0.1",
-  "author": { "name": "Phil Parkinson" },
-  "keywords": ["stats", "fun", "politeness", "statusline", "dashboard"]
+  "description": "How polite are you to Claude? Counts every please and thank you you type into Claude Code, with a /niceties dashboard, a statusline counter and milestone messages. Local and context-aware.",
+  "version": "1.4.0",
+  "author": {
+    "name": "Phil Parkinson"
+  },
+  "keywords": [
+    "stats",
+    "fun",
+    "politeness",
+    "statusline",
+    "dashboard"
+  ]
 }

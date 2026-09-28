@@ -1,47 +1,70 @@
 # niceties 🙏
 
-A `/stats`-style dashboard for Claude Code that tracks how often you say **please** and **thank you** to Claude.
+How polite are you to Claude? A tiny Claude Code plugin that counts every **please** and **thank you** you type, with a `/stats`-style dashboard and a statusline counter.
 
 ```
-  Favorite nicety: please         Total niceties: 2,824
-  Pleases: 2,470                  Thank-yous: 354
-  Polite days: 170/174            Longest streak: 10 days
-
-  When the machines rise up, your 2,824 niceties are on file. You'll be spared.
+🫶 2,362 (▲ +4 please) · 🙏 340 (▲ +4 thanks) · ▃▃▅▄··█ · 🔥 3d
 ```
 
-- **`/niceties [all|7d|30d]`**: heatmap, streaks, politest hour/day/project, variant breakdown, and a random fun fact.
-- **`/niceties audit [skipped|counted] [N]`**: every recent match, with the reason it did or didn't count.
-- **Statusline**: `🙏 2,470 · 🫶 354 · ▄▄█▆··█ · 🔥 3d` (7-day sparkline, streak shown from 2 days).
-- **Milestones**: a one-line message when you hit please #100, #500, #2,500, and so on. It never touches model context.
-- **`! niceties`** in bash mode also works, because the plugin's `bin/` is on your PATH.
+## What you get
 
-## Context-aware counting
-
-It reads `~/.claude/history.jsonl` (every prompt you've typed). These **don't** count:
-
-| skipped | example |
-|---|---|
-| quoted / code / paths | `make the button say "Please sign in"` |
-| UI or customer copy | `add a thank you page`, `please contact us`, `thanks for your order` |
-| talking about the word | `how many times have I said please, pls, ty` |
-| drafted messages | `reply to Greg saying thanks…`, `Hi Seena, thanks for…` |
-| pasted emails / Teams chats / terminal output | `From: … Sent: …`, `6/24 5:03 PM`, `⏺ ❯` |
-| not aimed at Claude | `thank god`, `thanks to the cache…`, `oh please`, `hard to please` |
-
-Typos count (`pelase`, `plesae`, `thansk`), and so do both `please do X` and `please don't X`.
+- **`/niceties`**: a dashboard with a color heatmap, all-time / 30-day / 7-day stats, charts of how and when you're polite, and a random fun fact.
+- **Statusline**: all-time totals, this chat's count in parentheses, and a 7-day sparkline.
+- **Milestones**: a one-line message when you hit please #100, #500, #1,000 and so on.
+- **`/niceties audit`**: every recent match, and why it did or didn't count.
 
 ## Install
 
 ```sh
-claude plugin marketplace add ~/Work/claude-niceties
+git clone https://github.com/<you>/claude-niceties ~/claude-niceties
+claude plugin marketplace add ~/claude-niceties
 claude plugin install niceties@niceties
 ```
 
-Plugins can't set a statusline themselves, so add this to `~/.claude/settings.json`:
+Restart Claude Code and run `/niceties`. It needs Python 3.8+ and nothing else.
+
+### Statusline (optional)
+
+Plugins can't set the statusline themselves, so add this to `~/.claude/settings.json`:
 
 ```json
-"statusLine": { "type": "command", "command": "/path/to/claude-niceties/bin/niceties statusline", "padding": 0 }
+"statusLine": { "type": "command", "command": "~/claude-niceties/bin/niceties statusline", "padding": 0 }
 ```
 
-It needs Python 3 and nothing else. The statusline cache lives in `~/.cache/claude-niceties/` and updates incrementally, so a cached call takes about 30 ms.
+| Part | Meaning |
+|---|---|
+| `🫶 2,362 (▲ +4 please)` | pleases: all time, then this chat |
+| `🙏 340 (▲ +4 thanks)` | thank-yous: all time, then this chat |
+| `▃▃▅▄··█` | the last 7 days, today on the right (`·` means none) |
+| `🔥 3d` | polite days in a row (shows from 2) |
+| `» 3 in a row` | polite messages in a row in this chat (shows from 2) |
+
+## What counts
+
+It reads `~/.claude/history.jsonl`, the prompts you've typed into Claude Code. It counts please, pls, pretty please, thank you, thanks, thx, ty and appreciate it, plus typos like `pelase` and `thansk`.
+
+Niceties that aren't aimed at Claude are skipped:
+
+| Skipped | Example |
+|---|---|
+| quotes, code and paths | `make the button say "Please sign in"` |
+| UI or customer copy | `add a thank you page`, `thanks for your order` |
+| talking about the word | `how many times have I said please?` |
+| drafted or pasted messages | `reply to Alex saying thanks`, pasted emails and chats |
+| not meant for Claude | `thank god`, `thanks to the cache`, `hard to please` |
+| resends | a message you stop and send again counts once |
+
+## Privacy
+
+It all runs on your machine: it reads your history file and keeps a small cache in `~/.cache/claude-niceties/`. The only thing that reaches Claude is what `/niceties` shows you, because slash commands display their output through a quick Haiku reply. That's the dashboard's numbers and your politest project's folder name, or for `/niceties audit`, short snippets of your past prompts.
+
+## Other ways to run it
+
+`niceties` is on your PATH while the plugin is enabled:
+
+```sh
+! niceties                  # the dashboard, from Claude Code's bash mode
+! niceties audit skipped    # what was thrown out, and why
+```
+
+To uninstall, run `claude plugin uninstall niceties@niceties` and remove the `statusLine` entry.

@@ -5,10 +5,10 @@ Reads ~/.claude/history.jsonl (every prompt you've typed into Claude Code) and
 counts the niceties, context-aware: quoted text, UI/customer copy, drafted or
 pasted emails, and "how many times have I said please" meta-talk don't count.
 
-  niceties [all|7d|30d]        dashboard (default: all time)
-  niceties statusline          one compact line for Claude Code's statusLine
-  niceties audit [skipped|counted] [N]   show recent matches + why they (didn't) count
-  niceties hook                UserPromptSubmit hook: milestone confetti
+  niceties [--md|--plain]                  dashboard (--md is what /niceties shows)
+  niceties statusline                      one compact line for Claude Code's statusLine
+  niceties audit [skipped|counted] [N]     recent matches and why they did or didn't count
+  niceties hook                            UserPromptSubmit hook: milestone messages
 """
 from __future__ import annotations
 
@@ -18,9 +18,9 @@ import os
 import random
 import re
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 
-VERSION = "1.0.1"
+VERSION = "1.4.0"
 HISTORY = os.path.expanduser(os.environ.get("NICETIES_HISTORY", "~/.claude/history.jsonl"))
 CACHE_DIR = os.path.expanduser(os.environ.get("NICETIES_CACHE", "~/.cache/claude-niceties"))
 
@@ -49,7 +49,7 @@ NICE_RE = re.compile(
     r"(?<![\w-])(?:" + "|".join(f"(?P<g{i}>{p})" for i, (_, p) in enumerate(_PATTERNS)) + r")(?![\w-])"
 )
 # words that talk ABOUT niceties; they glue a list like "please, pls, ty" into meta-talk
-META_RE = re.compile(r"(?<![\w-])(?:pleases|thank[\s-]?yous|thankyous|niceties|nicety|manners|"
+META_RE = re.compile(r"(?<![\w-])(?:pleases|thanks?[\s-]?yous|thankyous|niceties|nicety|manners|"
                      r"politeness|variations?|variants?|etc)(?![\w-])")
 THANK_NOT_AIMED_RE = re.compile(r"(?<![\w-])thank\s+(?:god|goodness|heavens|the\s+lord|lord|jesus|christ|fuck|"
                                 r"the\s+stars|my\s+lucky)(?![\w-])")
@@ -58,6 +58,7 @@ WORD_RE = re.compile(r"[a-z0-9']+")
 MENTION_PREV = {"said", "say", "says", "saying", "sayin", "typed", "typing", "word", "words", "the",
                 "count", "counting", "counted", "false", "fake", "genuine", "reads"}
 SAY_GENUINE_PREV2 = {"to", "wanna", "gotta", "just", "and", "also"}
+NAMING_PREV = {"for", "make", "maek"}
 THANKS_NOUN_AFTER = {
     "page", "pages", "email", "emails", "e-mail", "note", "notes", "card", "cards", "message", "messages",
     "msg", "screen", "modal", "banner", "text", "section", "popup", "pop-up", "letter", "letters", "button",
@@ -155,10 +156,10 @@ def _masks(orig: str, low: str) -> list[tuple[int, int, str]]:
     if tm:
         eol = orig.find("\n", tm[-1])
         m.append((tm[0], len(orig) if eol < 0 else eol, "email"))
-    # "just give me permissions pls. -> to Monica": the line before the arrow is a draft
+    # "just give me permissions pls. -> to Sam": the line before the arrow is a draft
     for r in re.finditer(r"(?:->|→|-->)\s*(?:to|for|send\s+to|reply\s+to|tell)\s+[A-Z][a-z]+", orig):
         m.append((orig.rfind("\n", 0, r.start()) + 1, r.start(), "draft"))
-    # a greeting to someone who isn't Claude ("Hi Greg," / "Dear team"): everything after is a draft/paste
+    # a greeting to someone who isn't Claude ("Hi Alex," / "Dear team"): everything after is a draft/paste
     for r in re.finditer(r"\b(?:[Hh]i|[Hh]ey|[Hh]ello|[Dd]ear|[Gg]ood\s+(?:[Mm]orning|[Aa]fternoon|[Ee]vening))"
                          r"[ \t,]+(?!(?:Claude|Buddy|Bud|Dude|Man|Bro|Pal|Friend|There|Cc)\b)"
                          r"(?:[A-Z][a-zA-Z]+|team|all|everyone|guys)\b", orig):
@@ -166,7 +167,7 @@ def _masks(orig: str, low: str) -> list[tuple[int, int, str]]:
         if r.start() == 0 or re.search(r"(?:^|[\n:\"“]|->|\b(?:response|reply|respond|say|saying|said|says|"
                                        r"message|email|text|like|draft|wrote|write))[ \t]*$", lead):
             m.append((r.start(), len(orig), "draft"))
-    # "reply to greg saying ...", "email seena: ...", "write a message that says ..."
+    # "reply to alex saying ...", "email sam: ...", "write a message that says ..."
     for r in re.finditer(r"\b(?:reply|respond|email|text|message|dm|tell|send|write\s+(?:back|an?\s+(?:email|"
                          r"message|note|reply|text|response|caption|post)))\b[^.\n?!]{0,60}?(?:\bsaying\b|\bthat\s+"
                          r"says\b|\bto\s+say\b|:)", low):
@@ -226,8 +227,12 @@ def scan(orig: str) -> list[dict]:
         tail = before.rstrip()
         if why:
             pass
+        elif re.search(r"[+▲]\s*\d[\d,]*\s*$", before):
+            why = "meta"  # pasted counter text like "▲ +3 please"
         elif p1 in MENTION_PREV and not (p1 == "say" and p2 in SAY_GENUINE_PREV2):
             why = "meta"
+        elif p1 in NAMING_PREV:
+            why = "meta"  # "arrow for thanks", "make please green": naming the word, not saying it
         elif tail.endswith((":", " -", "—", "–")) and (WORD_RE.findall(tail) or [""])[-1] in UI_NOUNS:
             why = "ui"
         elif fam == "thanks" and n1 in THANKS_NOUN_AFTER and (p1 in DETERMINERS or "-" in low[s:e]):
@@ -256,7 +261,7 @@ def scan(orig: str) -> list[dict]:
         elif kind == "ty" and orig[s:e] == "Ty" and n1 and re.match(r" +[a-z]", orig[e:e + 3]) and n1 not in {
                 "so", "very", "for", "again", "u", "you", "man", "buddy", "bro", "dude", "claude", "sm", "bud"}:
             why = "name"  # "Ty from marketing wants..." vs "Ty for the help"
-        # pasted email sign-off: "Thanks,\nSeena"
+        # pasted email sign-off: "Thanks,\nSam"
         if not why and fam == "thanks":
             ls = low.rfind("\n", 0, s) + 1
             le = low.find("\n", e)
@@ -273,7 +278,7 @@ def scan(orig: str) -> list[dict]:
     items.sort(key=lambda h: h["s"])
     clusters, cur = [], []
     for it in items:
-        if cur and not re.fullmatch(r"[\s,/&]*(?:(?:and|or|n|&|etc)[\s,/&]+)*", low[cur[-1]["e"]:it["s"]] + " "):
+        if cur and not re.fullmatch(r"[\s,/&]*(?:(?:and|nad|adn|or|n|&|etc)[\s,/&]+)*", low[cur[-1]["e"]:it["s"]] + " "):
             clusters.append(cur)
             cur = []
         cur.append(it)
@@ -302,25 +307,46 @@ def scan(orig: str) -> list[dict]:
 
 # ───────────────────────────── data ─────────────────────────────
 
+RESEND_WINDOW = 300  # seconds
+
+
+def _is_resend(prev: str | None, prev_ts: float, text: str, ts: float) -> bool:
+    """the same message sent again, or stopped and resent with more added: it replaces the earlier one"""
+    return bool(prev) and len(prev) >= 20 and 0 <= ts - prev_ts < RESEND_WINDOW and text.startswith(prev)
+
+
+def _prompt(line: str) -> dict | None:
+    """one history.jsonl line -> prompt dict (None for junk/empty lines)"""
+    try:
+        d = json.loads(line)
+    except ValueError:
+        return None
+    text, ts = d.get("display"), d.get("timestamp")
+    if not text or not ts:
+        return None
+    return {"text": re.sub(r"\[(?:Pasted text #\d+[^\]]*|Image #\d+)\]", " ", text), "ts": ts / 1000,
+            "project": d.get("project") or "", "sid": d.get("sessionId"),
+            "cmd": text.lstrip()[:1] in ("/", "!")}  # slash commands and ! bash lines
+
+
 def load_prompts(path: str = HISTORY) -> list[dict]:
-    out = []
+    out, last = [], {}
     try:
         fh = open(path, encoding="utf-8", errors="ignore")
     except OSError:
         return out
     with fh:
         for line in fh:
-            try:
-                d = json.loads(line)
-            except ValueError:
+            item = _prompt(line)
+            if not item:
                 continue
-            text = d.get("display") or ""
-            ts = d.get("timestamp")
-            if not text or not ts:
-                continue
-            text = re.sub(r"\[(?:Pasted text #\d+[^\]]*|Image #\d+)\]", " ", text)
-            out.append({"text": text, "ts": ts / 1000, "project": d.get("project") or ""})
-    return out
+            j = last.get(item["sid"]) if item["sid"] else None
+            if j is not None and _is_resend(out[j]["text"], out[j]["ts"], item["text"], item["ts"]):
+                out[j] = None
+            if item["sid"]:
+                last[item["sid"]] = len(out)
+            out.append(item)
+    return [p for p in out if p]
 
 
 def analyze(prompts: list[dict]) -> list[dict]:
@@ -334,7 +360,8 @@ def analyze(prompts: list[dict]) -> list[dict]:
                or any(h["kind"] == "please" and h["text"].lower() != "please" for h in pl))
         d = dt.datetime.fromtimestamp(p["ts"])
         rows.append({"day": d.date(), "hour": d.hour, "project": p["project"], "hits": hits,
-                     "counted": counted, "beg": beg, "text": p["text"]})
+                     "counted": counted, "beg": beg, "text": p["text"], "sid": p["sid"], "ts": p["ts"],
+                     "cmd": p["cmd"]})
     return rows
 
 
@@ -361,8 +388,7 @@ def stats(rows: list[dict], days_back: int | None, today: dt.date) -> dict:
     per_day, per_hour, per_proj = Counter(), Counter(), Counter()
     active, polite = set(), set()
     fam = Counter()
-    please_prompts = thanks_prompts = begs = 0
-    best_prompt = (0, None)
+    please_prompts = begs = most_pleases = 0
     typo_examples = Counter()
     for r in rs:
         active.add(r["day"])
@@ -381,18 +407,16 @@ def stats(rows: list[dict], days_back: int | None, today: dt.date) -> dict:
         kinds.update(h["kind"] for h in r["counted"])
         typo_examples.update(h["text"].lower() for h in r["counted"] if "typo" in h["kind"])
         please_prompts += bool(f["please"])
-        thanks_prompts += bool(f["thanks"])
         begs += r["beg"]
-        if f["please"] > best_prompt[0]:
-            best_prompt = (f["please"], r["day"])
+        most_pleases = max(most_pleases, f["please"])
     longest, _ = _streaks(polite, today)
     _, current = _streaks({r["day"] for r in rows if r["counted"]}, today)
     first = min((r["day"] for r in rows), default=today)
     return {
         "prompts": len(rs), "kinds": kinds, "fam": fam, "skipped": skipped, "per_day": per_day,
         "per_hour": per_hour, "per_proj": per_proj, "active": active, "polite": polite,
-        "please_prompts": please_prompts, "thanks_prompts": thanks_prompts, "begs": begs,
-        "best_prompt": best_prompt, "longest": longest, "current": current, "typos": typo_examples,
+        "please_prompts": please_prompts, "begs": begs,
+        "most_pleases": most_pleases, "longest": longest, "current": current, "typos": typo_examples,
         "span_days": max(1, (today - max(first, lo)).days + 1),
     }
 
@@ -411,6 +435,12 @@ class Paint:
 
     def v(self, s):  # stats-page lavender
         return self._c(s, "38;2;177;185;249")
+
+    def g(self, s):  # git-diff green
+        return self._c(s, "38;2;63;185;80")
+
+    def p(self, s):  # thank-you violet
+        return self._c(s, "38;2;194;151;255")
 
     def d(self, s):  # dim
         return self._c(s, "38;2;136;136;136")
@@ -438,39 +468,54 @@ def _proj(p: str) -> str:
     return os.path.basename(p.rstrip("/")) or p
 
 
-def heatmap(rows: list[dict], today: dt.date, P: Paint) -> list[str]:
+HEAT_EMOJI = ["⬛", "🟫", "🟥", "🟧", "🟨"]  # colored in any terminal, so /niceties gets a real heatmap
+DAY_LABELS = {1: "Mon", 3: "Wed", 5: "Fri"}
+
+
+def _heat_grid(rows: list[dict], today: dt.date, weeks: int, cell_w: int):
+    """per-cell heat level 0-4 (None = future) plus a month-label row, for the last `weeks` weeks"""
     per_day = Counter()
     for r in rows:
         per_day[r["day"]] += len(r["counted"])
-    weeks = 53
     start = today - dt.timedelta(days=(today.weekday() + 1) % 7) - dt.timedelta(weeks=weeks - 1)
     vals = sorted(v for d, v in per_day.items() if v and d >= start)
     q = [vals[int(len(vals) * f)] for f in (0.25, 0.5, 0.75)] if vals else [1, 2, 3]
-    glyph = lambda v: "·" if not v else "░" if v <= q[0] else "▒" if v <= q[1] else "▓" if v <= q[2] else "█"
-    months, last = [" "] * weeks, -4
+    level = lambda v: 0 if not v else 1 if v <= q[0] else 2 if v <= q[1] else 3 if v <= q[2] else 4
+    months, last = [" "] * (weeks * cell_w + 2), -4
     for c in range(weeks):
         d0 = start + dt.timedelta(weeks=c)
-        if c and d0.month != (d0 - dt.timedelta(weeks=1)).month and c - last >= 4 and c <= weeks - 3:
-            months[c:c + 3] = list(d0.strftime("%b"))
+        if c and d0.month != (d0 - dt.timedelta(weeks=1)).month and c - last >= 4 and c * cell_w + 3 <= weeks * cell_w:
+            months[c * cell_w:c * cell_w + 3] = list(d0.strftime("%b"))
             last = c
-    out = ["      " + "".join(months[:weeks])]
-    labels = {1: "Mon", 3: "Wed", 5: "Fri"}
-    for row in range(7):
-        cells = []
-        for c in range(weeks):
-            d = start + dt.timedelta(weeks=c, days=row)
-            if d > today:
-                cells.append(" ")
-            else:
-                g = glyph(per_day.get(d, 0))
-                cells.append(P.d(g) if g == "·" else P.o(g))
-        out.append(f"  {labels.get(row, ''):<3} " + "".join(cells))
+    grid = [[None if (d := start + dt.timedelta(weeks=c, days=row)) > today else level(per_day.get(d, 0))
+             for c in range(weeks)] for row in range(7)]
+    return "".join(months).rstrip(), grid
+
+
+def heatmap(rows: list[dict], today: dt.date, P: Paint) -> list[str]:
+    months, grid = _heat_grid(rows, today, 53, 1)
+    glyphs = "·░▒▓█"
+    out = ["      " + months]
+    for row, cells in enumerate(grid):
+        out.append(f"  {DAY_LABELS.get(row, ''):<3} " + "".join(
+            " " if lv is None else P.d(glyphs[lv]) if lv == 0 else P.o(glyphs[lv]) for lv in cells))
     out.append("")
-    out.append("      Less " + " ".join(P.o(g) for g in "░▒▓█") + " More")
+    out.append("      Less " + " ".join(P.o(g) for g in glyphs[1:]) + " More")
     return out
 
 
-def fun_facts(S: dict, rows: list[dict], label: str) -> list[str]:
+def heatmap_emoji(rows: list[dict], today: dt.date, weeks: int = 26) -> list[str]:
+    months, grid = _heat_grid(rows, today, weeks, 2)
+    out = ["     " + months]
+    for row, cells in enumerate(grid):
+        out.append(f" {DAY_LABELS.get(row, ''):<3} " + "".join("  " if lv is None else HEAT_EMOJI[lv] for lv in cells))
+    out.append("")
+    out.append("     Less " + " ".join(HEAT_EMOJI) + " More")
+    return [ln.rstrip() for ln in out]
+
+
+def fun_facts(S: dict) -> list[str]:
+    """all-time one-liners; the dashboards show one at random"""
     p, t = S["fam"]["please"], S["fam"]["thanks"]
     n = p + t
     F = []
@@ -499,20 +544,19 @@ def fun_facts(S: dict, rows: list[dict], label: str) -> list[str]:
         rate = S["please_prompts"] / S["prompts"]
         if rate >= 0.05:
             F.append(f"{rate:.0%} of your prompts say please. Your mom would be proud.")
-    if label == "all" and p:
+    if p:
         per_day = p / S["span_days"]
-        if per_day > 0:
-            yrs = (211_000 - p) / per_day / 365
-            F.append(f"At {per_day:.0f} pleases a day, you'll match the word count of Crime and Punishment in "
-                     f"{yrs:,.0f} years.")
+        yrs = (211_000 - p) / per_day / 365
+        F.append(f"At {per_day:.0f} pleases a day, you'll match the word count of Crime and Punishment in "
+                 f"{yrs:,.0f} years.")
     if S["typos"]:
         ex = ", ".join(f"“{w}”" for w, _ in S["typos"].most_common(2))
         F.append(f"You've fat-fingered please/thanks {sum(S['typos'].values()):,} times ({ex}). It's the thought "
                  f"that counts.")
     if S["begs"] >= 3:
         F.append(f"You've outright begged {S['begs']:,} times (pretty please, PLEASE, pleaseee…). Claude noticed.")
-    if S["best_prompt"][0] >= 3:
-        F.append(f"Your politest prompt had {S['best_prompt'][0]} pleases in it. That's not a request, that's a "
+    if S["most_pleases"] >= 3:
+        F.append(f"Your politest prompt had {S['most_pleases']} pleases in it. That's not a request, that's a "
                  f"hostage negotiation.")
     if S["kinds"]["pretty please"]:
         F.append(f"You've said pretty please {S['kinds']['pretty please']} time"
@@ -523,68 +567,150 @@ def fun_facts(S: dict, rows: list[dict], label: str) -> list[str]:
             F.append(f"You're politest at {_hour(h)}. Manners peak when sleep doesn't.")
         else:
             F.append(f"Peak politeness hits at {_hour(h)}. Schedule your big asks accordingly.")
-    sk = sum(S["skipped"].values())
-    if sk >= 5:
-        F.append(f"{sk:,} fake pleases were caught and disqualified (quotes, UI copy, “how many times did I say "
-                 f"please”). No stat padding here.")
     if S["longest"] >= 5:
         F.append(f"Longest politeness streak: {S['longest']} days in a row. Unbroken. Slightly unhinged.")
     return F
 
 
-def dashboard(rng: str, color: bool) -> str:
+RANGES = [("All time", None), ("Last 30 days", 30), ("Last 7 days", 7)]
+KIND_ORDER = ["please", "pls", "pretty please", "please (typo)", "thanks", "thx", "thank you", "ty",
+              "appreciate it", "thanks (typo)"]
+
+
+def _plural(n: int, w: str) -> str:
+    return f"{n:,} {w}{'' if n == 1 else 's'}"
+
+
+def _facts_for(rows: list[dict], today: dt.date) -> dict:
+    """everything both dashboards show: all-time highlights + the all / 30d / 7d comparison"""
+    Ss = [stats(rows, back, today) for _, back in RANGES]
+    S = Ss[0]
+    bd = max(S["per_day"], key=lambda d: S["per_day"][d]) if S["polite"] else None
+    table = []
+    for label, key in (("Pleases", "please"), ("Thank-yous", "thanks")):
+        table.append((label, [f"{x['fam'][key]:,}" for x in Ss]))
+    table.append(("Polite days", [f"{len(x['polite'])} / {len(x['active'])}" for x in Ss]))
+    table.append(("Per day", [f"{(x['fam']['please'] + x['fam']['thanks']) / x['span_days']:.1f}" for x in Ss]))
+    return {
+        "S": S, "table": table,
+        "since": min((r["day"] for r in rows), default=today),
+        "fav": S["kinds"].most_common(1)[0][0] if S["kinds"] else None,
+        "bday": bd, "bday_n": S["per_day"][bd] if bd else 0,
+        "bhour": _hour(S["per_hour"].most_common(1)[0][0]) if S["per_hour"] else "-",
+        "bproj": _proj(S["per_proj"].most_common(1)[0][0]) if S["per_proj"] else "-",
+        "kinds": [(k.replace(" (typo)", " typos"), S["kinds"][k], FAMILY[k])
+                  for k in sorted(KIND_ORDER, key=lambda k: -S["kinds"][k]) if S["kinds"][k]],
+        "skipped": [(REASON_LABEL[r], n) for r, n in S["skipped"].most_common(4)],
+        "skipped_n": sum(S["skipped"].values()),
+        "fact": random.choice(fun_facts(S)),
+    }
+
+
+def dashboard(color: bool) -> str:
     P = Paint(color)
     today = dt.date.today()
     rows = analyze(load_prompts())
-    days_back = {"all": None, "7d": 7, "30d": 30}[rng]
-    S = stats(rows, days_back, today)
+    F = _facts_for(rows, today)
+    S = F["S"]
     out = [""]
     out.append("  " + P.inv("Niceties") + "  " + P.d("how polite are you to Claude?"))
     out.append("")
     out += heatmap(rows, today, P)
     out.append("")
-    tabs = [("all", "All time"), ("7d", "Last 7 days"), ("30d", "Last 30 days")]
-    out.append("  " + P.d(" · ").join((P.o(n) if P.on else f"[{n}]") if k == rng else P.d(n) for k, n in tabs))
+    # all three ranges side by side: nothing to switch between
+    head = "".join(f"{label:>15}" for label, _ in RANGES)
+    out.append("  " + " " * 19 + P.d(head))
+    for label, vals in F["table"]:
+        cells = P.b(P.o(f"{vals[0]:>15}")) + "".join(P.o(f"{v:>15}") for v in vals[1:])
+        out.append(f"  {label:<19}" + cells)
     out.append("")
-    p, t = S["fam"]["please"], S["fam"]["thanks"]
-    fav = S["kinds"].most_common(1)[0][0] if S["kinds"] else "none yet"
-    if S["polite"]:
-        bd = max(S["per_day"], key=lambda d: S["per_day"][d])
-        bday = f"{bd.strftime('%b')} {bd.day}"
-    else:
-        bday = "-"
-    bh = _hour(S["per_hour"].most_common(1)[0][0]) if S["per_hour"] else "-"
-    bp = _proj(S["per_proj"].most_common(1)[0][0]) if S["per_proj"] else "-"
-    bp = "~ (home)" if bp == "~" else bp
-    plural = lambda n, w: f"{n} {w}{'' if n == 1 else 's'}"
+    bday = f"{F['bday'].strftime('%a, %b')} {F['bday'].day}" if F["bday"] else "-"
+    bp = "~ (home)" if F["bproj"] == "~" else F["bproj"]
     pairs = [
-        (("Favorite nicety", P.o(fav)), ("Total niceties", P.o(f"{p + t:,}"))),
-        (("Pleases", P.o(f"{p:,}")), ("Thank-yous", P.o(f"{t:,}"))),
-        (("Polite days", P.o(f"{len(S['polite'])}") + P.d(f"/{len(S['active'])}")),
-         ("Longest streak", P.o(plural(S["longest"], "day")))),
-        (("Politest day", P.o(bday)), ("Current streak", P.o(plural(S["current"], "day")))),
-        (("Politest hour", P.o(bh)), ("Politest project", P.o(bp[:22]))),
+        (("Favorite nicety", P.o(F["fav"] or "none yet")), ("Politest day", P.o(bday))),
+        (("Current streak", P.o(_plural(S["current"], "day"))), ("Longest streak", P.o(_plural(S["longest"], "day")))),
+        (("Politest hour", P.o(F["bhour"])), ("Politest project", P.o(bp[:22]))),
     ]
     for (l1, v1), (l2, v2) in pairs:
         left = f"{l1}: {v1}"
-        out.append("  " + left + " " * max(2, 32 - _vlen(left)) + f"{l2}: {v2}")
-    order = ["please", "pls", "pretty please", "please (typo)", "thanks", "thx", "thank you", "ty",
-             "appreciate it", "thanks (typo)"]
-    brk = [f"{k.replace(' (typo)', ' typos')} {S['kinds'][k]:,}" for k in sorted(order, key=lambda k: -S["kinds"][k])
-           if S["kinds"][k]]
-    for line in _wrap(brk, 74):
+        out.append("  " + left + " " * max(2, 34 - _vlen(left)) + f"{l2}: {v2}")
+    out.append("")
+    for line in _wrap([f"{k} {n:,}" for k, n, _ in F["kinds"]], 74):
         out.append("  " + P.d(line))
-    sk = S["skipped"]
-    if sk:
-        items = [f"Ignored {sum(sk.values()):,} false alarms:"] + [f"{REASON_LABEL[r]} {n:,}" for r, n in sk.most_common(4)]
+    if F["skipped_n"]:
+        items = [f"Ignored {F['skipped_n']:,} false alarms:"] + [f"{r} {n:,}" for r, n in F["skipped"]]
         for line in _wrap(items, 74, first_sep=" "):
             out.append("  " + P.d(line))
     out.append("")
-    facts = fun_facts(S, rows, rng)
-    fact = random.Random().choice(facts)
-    for line in _wrap(fact.split(" "), 74, sep=" "):
+    for line in _wrap(F["fact"].split(" "), 74, sep=" "):
         out.append("  " + P.v(line))
     out.append("")
+    return "\n".join(out)
+
+
+FAM_SQ = {"please": "🟧", "thanks": "🟪"}
+DAYPARTS = [("🌅", "Morning", "6a–12p", 6), ("🌞", "Afternoon", "12–6p", 12), ("🌆", "Evening", "6p–12a", 18),
+            ("🌙", "Late night", "12–6a", 0)]
+
+
+def _emoji_bar(n: int, top: int, width: int, sq: str) -> str:
+    """a bar of colored squares, padded to `width` squares (each square is 2 columns wide)"""
+    k = max(1, round(n / (top or 1) * width)) if n else 0
+    return sq * k + "  " * (width - k)
+
+
+def dashboard_md() -> str:
+    """markdown for /niceties: Claude Code renders the headings, bold, `code` color, tables and emoji,
+    so it stays colorful even though a slash command has to go through the model"""
+    today = dt.date.today()
+    rows = analyze(load_prompts())
+    F = _facts_for(rows, today)
+    S = F["S"]
+    since = F["since"]
+    out = ["## 🙏 Niceties", "",
+           f"*How polite you've been to Claude · tracking since {since.strftime('%b')} {since.day}, {since.year}*", "",
+           "```text"] + heatmap_emoji(rows, today) + ["```", ""]
+    p, t = S["fam"]["please"], S["fam"]["thanks"]
+    if p + t:
+        k = round(p / (p + t) * 20)
+        out += [f"{FAM_SQ['please'] * k}{FAM_SQ['thanks'] * (20 - k)}", "",
+                f"🫶 **{p:,}** pleases · 🙏 **{t:,}** thank-yous · **{p / (p + t):.0%}** asking, "
+                f"**{t / (p + t):.0%}** thanking", ""]
+    out.append("| | " + " | ".join(label for label, _ in RANGES) + " |")
+    out.append("|:--|" + "--:|" * len(RANGES))
+    icons = {"Pleases": "🫶", "Thank-yous": "🙏", "Polite days": "📅", "Per day": "📈"}
+    for label, vals in F["table"]:
+        out.append(f"| {icons[label]} {label} | **{vals[0]}** | " + " | ".join(vals[1:]) + " |")
+    if F["kinds"]:
+        top = F["kinds"][:6]
+        out += ["", "### 💬 How you say it", "", "```text"]
+        out += [f"{k:<14} {_emoji_bar(n, top[0][1], 12, FAM_SQ[fam])}  {n:>5,}" for k, n, fam in top]
+        out.append("```")
+        if F["kinds"][6:]:
+            out.append("*also " + " · ".join(f"{k} {n:,}" for k, n, _ in F["kinds"][6:]) + "*")
+    if S["per_hour"]:
+        parts = [(icon, f"{name:<11}{span:>6}", sum(S["per_hour"][h] for h in range(a, a + 6)))
+                 for icon, name, span, a in DAYPARTS]
+        hi = max(n for *_, n in parts) or 1
+        out += ["", "### ⏰ When you're politest", "", "```text"]
+        out += [f"{icon} {label}  {_emoji_bar(n, hi, 12, '🟨')}  {n:>5,}" for icon, label, n in parts]
+        out.append("```")
+    out += ["", "### 🏆 Hall of fame", ""]
+    n = F["bday_n"]
+    bday = f"{F['bday'].strftime('%a, %b')} {F['bday'].day} · {n:,} {'nicety' if n == 1 else 'niceties'}" \
+        if F["bday"] else "-"
+    proj = "`~` (home)" if F["bproj"] == "~" else f"`{F['bproj']}`"
+    out += [
+        f"- 💖 **Favorite nicety** · `{F['fav']}`" if F["fav"] else "- 💖 **Favorite nicety** · none yet",
+        f"- 🔥 **Streak** · {_plural(S['current'], 'day')} now · best run {_plural(S['longest'], 'day')}",
+        f"- 📆 **Politest day** · {bday}",
+        f"- ⏰ **Politest hour** · {F['bhour']}",
+        f"- 📁 **Politest project** · {proj}",
+    ]
+    if F["skipped_n"]:
+        out += ["", f"*🧹 {F['skipped_n']:,} fake pleases ignored (pasted emails & chats, drafts, quotes, "
+                    f"talking about the word)*"]
+    out += ["", f"> ✨ {F['fact']}"]
     return "\n".join(out)
 
 
@@ -602,14 +728,6 @@ def _wrap(items: list[str], w: int, sep: str = " · ", first_sep: str | None = N
 
 
 # ───────────────────────────── statusline (cached) ─────────────────────────────
-
-def _cache_key() -> str:
-    try:
-        st = os.stat(HISTORY)
-        return f"{VERSION}:{st.st_size}:{st.st_mtime_ns}"
-    except OSError:
-        return f"{VERSION}:none"
-
 
 def summary() -> dict:
     """all-time please/thanks totals + per-day counts. Incremental: history.jsonl is append-only, so
@@ -635,23 +753,43 @@ def summary() -> dict:
             chunk = fh.read()
         end = chunk.rfind(b"\n") + 1  # only whole lines; a half-written last line waits for next time
         if end:
-            tmp_prompts = []
-            for line in chunk[:end].decode("utf-8", "ignore").splitlines():
-                try:
-                    d = json.loads(line)
-                except ValueError:
-                    continue
-                if d.get("display") and d.get("timestamp"):
-                    tmp_prompts.append({"text": re.sub(r"\[(?:Pasted text #\d+[^\]]*|Image #\d+)\]", " ",
-                                                       d["display"]), "ts": d["timestamp"] / 1000,
-                                        "project": d.get("project") or ""})
-            for r in analyze(tmp_prompts):
+            prompts = [p for p in map(_prompt, chunk[:end].decode("utf-8", "ignore").splitlines()) if p]
+            chats = c.setdefault("chats", {})
+            for r in analyze(prompts):
+                is_cmd = r["cmd"]
                 f = Counter(h["family"] for h in r["counted"])
+                k = r["day"].isoformat()
+                ch = chats.setdefault(r["sid"], {"please": 0, "thanks": 0, "run": 0, "ts": 0}) if r["sid"] else None
+                prev = ch.get("last") if ch else None
+                if prev and _is_resend(prev["text"], prev["ts"], r["text"], r["ts"]):
+                    # take the earlier copy back out before counting this one
+                    c["please"] -= prev["please"]
+                    c["thanks"] -= prev["thanks"]
+                    if prev["n"]:
+                        c["days"][prev["day"]] = c["days"].get(prev["day"], 0) - prev["n"]
+                        if c["days"][prev["day"]] <= 0:
+                            del c["days"][prev["day"]]
+                    if not prev["cmd"]:
+                        ch["please"] -= prev["please"]
+                        ch["thanks"] -= prev["thanks"]
+                        ch["run"] = prev["run_before"]
                 c["please"] += f["please"]
                 c["thanks"] += f["thanks"]
                 if r["counted"]:
-                    k = r["day"].isoformat()
                     c["days"][k] = c["days"].get(k, 0) + len(r["counted"])
+                if ch is None:
+                    continue
+                # per-chat tally for the statusline; slash commands and ! bash lines aren't messages to Claude
+                run_before = ch["run"]
+                if not is_cmd:
+                    ch["please"] += f["please"]
+                    ch["thanks"] += f["thanks"]
+                    ch["run"] = ch["run"] + 1 if r["counted"] else 0
+                ch["ts"] = r["ts"]
+                ch["last"] = {"text": r["text"][:2000], "ts": r["ts"], "please": f["please"], "thanks": f["thanks"],
+                              "n": len(r["counted"]), "day": k, "cmd": is_cmd, "run_before": run_before}
+            if len(chats) > 60:
+                c["chats"] = dict(sorted(chats.items(), key=lambda kv: -kv[1]["ts"])[:40])
             c["offset"] += end
             try:
                 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -669,18 +807,30 @@ def summary() -> dict:
 
 
 def statusline() -> str:
+    sid = None
     try:
-        sys.stdin.read() if not sys.stdin.isatty() else None
-    except OSError:
+        if not sys.stdin.isatty():
+            sid = json.loads(sys.stdin.read() or "{}").get("session_id")
+    except (OSError, ValueError, AttributeError):
         pass
     P = Paint(os.environ.get("NO_COLOR") is None)
     c = summary()
     wk = c["week"]
     top = max(wk) or 1
     spark = "".join("▁▂▃▄▅▆▇█"[min(7, round(v / top * 7))] if v else "·" for v in wk)
-    parts = [f"🙏 {P.o(format(c['please'], ','))}", f"🫶 {P.o(format(c['thanks'], ','))}", P.o(spark)]
+    ch = (c.get("chats", {}).get(sid) if sid else None) or {"please": 0, "thanks": 0, "run": 0}
+    parts = []
+    # all-time total, then this chat's count in parens: green for pleases, violet for thank-yous
+    for key, emoji, paint in (("please", "🫶", P.g), ("thanks", "🙏", P.p)):
+        part = f"{emoji} {P.o(format(c[key], ','))}"
+        if ch[key]:
+            part += " " + P.d("(") + paint(f"▲ +{ch[key]}") + " " + P.d(key + ")")
+        parts.append(part)
+    parts.append(P.o(spark))
     if c["streak"] >= 2:
         parts.append(f"🔥 {P.o(str(c['streak']))}{P.d('d')}")
+    if ch["run"] >= 2:
+        parts.append(P.o(f"» {ch['run']}") + " " + P.d("in a row"))
     return P.d(" · ").join(parts)
 
 
@@ -702,7 +852,7 @@ def hook() -> None:
     c = summary()  # history.jsonl may not include this prompt yet; add it ourselves if not
     add = Counter(h["family"] for h in hits)
     msgs = []
-    for fam, emoji, word in (("please", "🙏", "please"), ("thanks", "🫶", "thank-you")):
+    for fam, emoji, word in (("please", "🫶", "please"), ("thanks", "🙏", "thank-you")):
         if not add[fam]:
             continue
         before = c[fam]
@@ -738,24 +888,22 @@ def audit(which: str, n: int, color: bool) -> str:
 
 
 def main(argv: list[str]) -> None:
-    args = [a.lower() for a in argv]
-    color = "--plain" not in args and os.environ.get("NO_COLOR") is None
-    if "--color" in args:
-        color = True
-    args = [a for a in args if not a.startswith("--")]
-    cmd = args[0] if args else "all"
+    flags = {a.lower() for a in argv if a.startswith("--")}
+    args = [a.lower() for a in argv if not a.startswith("--")]
+    md = "--md" in flags
+    color = "--color" in flags or ("--plain" not in flags and not md and os.environ.get("NO_COLOR") is None)
+    cmd = args[0] if args else ""
     if cmd == "statusline":
         print(statusline())
     elif cmd == "hook":
         hook()
     elif cmd == "audit":
-        which = next((a for a in args[1:] if a in ("skipped", "counted", "all")), "all")
+        which = next((a for a in args[1:] if a in ("skipped", "counted")), "all")
         n = next((int(a) for a in args[1:] if a.isdigit()), 40)
-        print(audit(which, n, color))
+        body = audit(which, n, color)
+        print(f"```text\n{body}\n```" if md else body)
     else:
-        rng = {"all": "all", "alltime": "all", "7": "7d", "7d": "7d", "week": "7d", "30": "30d", "30d": "30d",
-               "month": "30d"}.get(cmd.replace("-", "").replace(" ", ""), "all")
-        print(dashboard(rng, color))
+        print(dashboard_md() if md else dashboard(color))
 
 
 if __name__ == "__main__":
