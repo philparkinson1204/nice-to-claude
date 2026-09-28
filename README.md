@@ -28,8 +28,10 @@ Restart Claude Code and run `/niceties`. It needs Python 3.8+ and nothing else.
 Plugins can't set the statusline themselves, so add this to `~/.claude/settings.json`:
 
 ```json
-"statusLine": { "type": "command", "command": "~/claude-niceties/bin/niceties statusline", "padding": 0 }
+"statusLine": { "type": "command", "command": "~/claude-niceties/bin/niceties statusline", "padding": 0, "refreshInterval": 10 }
 ```
+
+`refreshInterval` keeps the totals in sync when you have several Claude Code windows open. Without it, a window only updates when something happens in it. Each refresh takes about 20 ms.
 
 | Part | Meaning |
 |---|---|
