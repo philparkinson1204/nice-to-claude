@@ -1,5 +1,6 @@
 {
   "name": "niceties",
+  "description": "How polite are you to Claude? Please & thank-you stats for Claude Code.",
   "owner": {
     "name": "Phil Parkinson"
   },
