@@ -1,4 +1,4 @@
-nice-to-claude 1.1.0: how polite are you to Claude?
+nice-to-claude 1.0.0: how polite are you to Claude?
 ====================================================
 
 Needs Claude Code and Python 3.8+ (already on every Mac).

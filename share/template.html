@@ -30,9 +30,9 @@
   .lede { max-width: 58ch; margin: 0; color: var(--muted); font-size: 18px; }
   .hint { max-width: 70ch; margin: 18px 0 0; color: var(--muted); font-size: 15px; }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 56px 40px; margin: 44px 0 0; padding: 0; list-style: none; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 56px 32px; margin: 44px 0 0; padding: 0; list-style: none; }
   .card h2 { font-size: 22px; letter-spacing: -0.01em; margin: 0; }
-  .card .desc { margin: 2px 0 14px; color: var(--muted); }
+  .card .desc { margin: 2px 0 14px; color: var(--muted); min-height: 3em; }
   .card canvas { display: block; width: 100%; height: auto; border-radius: 12px; box-shadow: 0 18px 40px -26px rgba(20, 8, 40, 0.55); }
   .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
   .caption { margin: 14px 0 0; padding-left: 14px; border-left: 3px solid var(--line); color: var(--ink); font-size: 15px; }
@@ -114,7 +114,7 @@
   <header>
     <p class="mark">/nice-to-claude</p>
     <h1>Share your manners</h1>
-    <p class="lede">Four cards and a one-page summary, made on your computer from your Claude Code history. Nothing leaves this page unless you post it.</p>
+    <p class="lede">Three cards and a one-page summary, made on your computer from your Claude Code history. Nothing leaves this page unless you post it.</p>
     <p class="hint" id="hint">Download a card, then use a post link: it opens a draft with the caption filled in, and you attach the card. LinkedIn only takes the link, so the caption is copied for you to paste.</p>
   </header>
   <main id="main">
@@ -142,13 +142,12 @@ const DATA = /*__NICE_DATA__*/null;
 const W = 1080, H = 1350, M = 84;
 const C = {
   grape: "#25163F", onDark: "#F6F1FF", onDarkMuted: "#B9ADD8", onDarkSoft: "#E4DCF7",
-  lilac: "#F2ECFF", ink: "#1E1433", inkMuted: "#655A7C", line: "#DCD2F0", paper: "#FFFFFF",
+  ink: "#1E1433", inkMuted: "#655A7C", line: "#DCD2F0", paper: "#FFFFFF",
   pleaseL: "#D9620F", thanksL: "#7B4DEA", pleaseD: "#E36A16", thanksD: "#9467F7",
   rampD: ["#322843", "#69391C", "#9E511E", "#D66919", "#FF9550"],
   rampL: ["#EFEDF6", "#F9D6BF", "#F0AD7F", "#DD7B2B", "#B45600"],
-  gold: "#FFC53D", goldEdge: "#D99A00", streakTint: "#FFF4D6",
   field: { please: "#E8681A", thanks: "#7B4DEA" }, fieldInk: { please: "#2B1305", thanks: "#FFFFFF" },
-  sticker: "#FFF8EE", receiptField: "#6B3FDB",
+  sticker: "#FFF8EE", receiptField: "#D77757",
 };
 const FONT = {
   sans: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif',
@@ -256,12 +255,6 @@ function headline() {
   if (p && t) return `I've said please to Claude ${fmt(p)} ${times(p)} and thank you ${fmt(t)} ${times(t)}.`;
   if (p) return `I've said please to Claude ${fmt(p)} ${times(p)}.`;
   return `I've said thank you to Claude ${fmt(t)} ${times(t)}.`;
-}
-function streakInfo() {
-  const D = DATA;
-  if (D.current >= 2) return { n: D.current, now: true };
-  if (D.longest >= 2) return { n: D.longest, now: false };
-  return { n: D.chart.filter(c => c.on).length, now: null };
 }
 function famWord(fam) { return fam === "please" ? "please" : "thank you"; }
 
@@ -401,76 +394,7 @@ function drawMilestone(ctx, st) {
   ctx.textAlign = "left";
 }
 
-/* ── card 3: streak sticker chart ───────────────────────────────────────── */
-function goldStar(ctx, x, y, R, rot) {
-  ctx.save();
-  ctx.lineJoin = "round";
-  ctx.shadowColor = "rgba(60, 30, 0, 0.22)"; ctx.shadowBlur = 8; ctx.shadowOffsetY = 3;
-  starPath(ctx, x, y, R, rot); ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = R * 0.42; ctx.stroke();
-  ctx.restore();
-  ctx.save(); ctx.lineJoin = "round";
-  starPath(ctx, x, y, R, rot); ctx.fillStyle = C.gold; ctx.fill();
-  ctx.strokeStyle = C.goldEdge; ctx.lineWidth = 2.5; ctx.stroke();
-  ctx.restore();
-}
-function drawStreak(ctx) {
-  const D = DATA, inner = W - 2 * M, si = streakInfo();
-  bg(ctx, C.lilac);
-  wordmark(ctx, C.inkMuted);
-
-  // the number and what it means
-  const num = fmt(si.n);
-  const ns = fitLine(ctx, num, inner, 300, 120, 900);
-  track(ctx, -8); ctx.fillStyle = C.ink; ctx.fillText(num, M - 6, 158 + ns * 0.74);
-  const numW = ctx.measureText(num).width; track(ctx, 0);
-  if (numW + 320 < inner) goldStar(ctx, W - M - 150, 158 + ns * 0.42, 118, 0.18);
-  let line;
-  if (si.now === true) line = `${days(si.n)} in a row of saying please or thank you to Claude.`;
-  else if (si.now === false) line = `${days(si.n)} in a row of being nice to Claude. My record, ${D.longestFrom} to ${D.longestTo}.`;
-  else line = `polite ${days(si.n)} with Claude in the last five weeks.`;
-  const tl = fitWrap(ctx, line, inner, 3, 54, 40, 750);
-  let y = 158 + ns * 0.74 + 84;
-  ctx.fillStyle = C.ink; track(ctx, -0.5);
-  tl.lines.forEach((l, i) => ctx.fillText(l, M, y + i * Math.round(tl.size * 1.12)));
-  track(ctx, 0);
-  y += (tl.lines.length - 1) * Math.round(tl.size * 1.12) + 74;
-
-  // which days belong to the streak that's running now
-  const chart = D.chart, inRun = new Set();
-  if (si.now) {
-    let i = chart.findIndex(c => c.today);
-    if (i >= 0 && !chart[i].on) i--;
-    while (i >= 0 && chart[i].on) inRun.add(i--);
-  }
-
-  // the sticker chart: five weeks, Sunday first
-  const gap = 12, cw = (inner - 6 * gap) / 7;
-  const keyY = H - 66 - 78;                       // baseline of the star key, above the footer
-  const ch = Math.min(104, (keyY - 56 - (y + 18) - 4 * gap) / 5);
-  font(ctx, 700, 24); ctx.fillStyle = C.inkMuted; ctx.textAlign = "center";
-  ["S", "M", "T", "W", "T", "F", "S"].forEach((d, i) => ctx.fillText(d, M + i * (cw + gap) + cw / 2, y));
-  ctx.textAlign = "left";
-  y += 18;
-  chart.forEach((c, i) => {
-    const col = i % 7, row = Math.floor(i / 7), x = M + col * (cw + gap), yy = y + row * (ch + gap);
-    rr(ctx, x, yy, cw, ch, 14);
-    if (c.future) { ctx.fillStyle = "rgba(255, 255, 255, 0.45)"; ctx.fill(); }
-    else {
-      ctx.fillStyle = inRun.has(i) ? C.streakTint : C.paper; ctx.fill();
-      ctx.lineWidth = c.today ? 4 : 2; ctx.strokeStyle = c.today ? C.ink : C.line; ctx.stroke();
-    }
-    font(ctx, 600, 21); ctx.fillStyle = c.future ? "rgba(101, 90, 124, 0.5)" : C.inkMuted;
-    ctx.fillText(c.d === 1 || i === 0 ? `${c.m} ${c.d}` : String(c.d), x + 13, yy + 28);
-    if (c.on) goldStar(ctx, x + cw * 0.6, yy + ch * 0.64, Math.min(28, ch * 0.26), (seeded(i + c.d) - 0.5) * 0.5);
-  });
-  y = keyY;
-  goldStar(ctx, M + 14, y - 10, 14, 0);
-  font(ctx, 500, 26); ctx.fillStyle = C.inkMuted;
-  ctx.fillText("a day I said please or thank you to Claude", M + 40, y);
-  footer(ctx, C.inkMuted);
-}
-
-/* ── card 4: receipt ────────────────────────────────────────────────────── */
+/* ── card 3: receipt ─────────────────────────────────────────────────────── */
 function receiptLines() {
   const D = DATA, total = D.please + D.thanks;
   const items = D.kinds.filter(k => !/typos$/.test(k[0])).map(k => [k[0].toUpperCase(), k[1]]);
@@ -515,7 +439,7 @@ function drawReceipt(ctx) {
   ctx.globalAlpha = 0.16;
   for (let i = 0; i < 120; i++) {
     const x = seeded(i) * W, y = seeded(i + 500) * H, s = 10 + seeded(i + 900) * 18;
-    ctx.fillStyle = i % 3 ? "#FFFFFF" : "#FF9550"; rr(ctx, x, y, s, s, 3); ctx.fill();
+    ctx.fillStyle = i % 3 ? "#FFFFFF" : "#7A2E17"; rr(ctx, x, y, s, s, 3); ctx.fill();
   }
   ctx.globalAlpha = 1;
 
@@ -536,7 +460,7 @@ function drawReceipt(ctx) {
   ctx.lineTo(pw, ph - tooth);
   for (let i = n; i > 0; i--) { ctx.lineTo(i * tw - tw / 2, ph); ctx.lineTo((i - 1) * tw, ph - tooth); }
   ctx.closePath();
-  ctx.save(); ctx.shadowColor = "rgba(18, 6, 40, 0.42)"; ctx.shadowBlur = 44; ctx.shadowOffsetY = 20;
+  ctx.save(); ctx.shadowColor = "rgba(74, 24, 8, 0.45)"; ctx.shadowBlur = 44; ctx.shadowOffsetY = 20;
   ctx.fillStyle = "#FFFEFB"; ctx.fill(); ctx.restore();
 
   const x0 = pad, x1 = pw - pad, xq = pad + (pw - 2 * pad) * 0.72;
@@ -581,9 +505,6 @@ const CARDS = [
   { id: "milestone", title: "Milestone", desc: "Your latest milestone, as a good-manners sticker.", draw: drawMilestone,
     alt: () => { const m = DATA.milestones[state.fam]; return `A good manners sticker for ${famWord(state.fam)} number ${fmt(m.n)}, reached ${m.date === "today" ? "today" : "on " + m.date}.`; },
     caption: () => `Just hit ${famWord(state.fam)} #${fmt(DATA.milestones[state.fam].n)} with Claude. Claude will remember this 🫶` },
-  { id: "streak", title: "Streak", desc: "A gold star for every polite day in the last five weeks.", draw: drawStreak,
-    alt: () => { const s = streakInfo(); return s.now === null ? `${s.n} polite days with Claude in the last five weeks, shown as gold stars on a calendar.` : `${s.n} days in a row of being nice to Claude, shown as gold stars on a calendar.`; },
-    caption: () => { const s = streakInfo(); return s.now === true ? `${fmt(s.n)} days in a row of saying please or thank you to Claude 🔥` : s.now === false ? `My record: ${fmt(s.n)} days in a row of being nice to Claude 🔥` : `${fmt(s.n)} polite days with Claude in the last five weeks ⭐`; } },
   { id: "receipt", title: "Receipt", desc: "Your manners, itemized, with a QR code to the plugin.", draw: drawReceipt,
     alt: () => `A receipt itemizing ${fmt(DATA.please + DATA.thanks)} pleases and thank-yous, total due $0.00, with a QR code to the plugin.`,
     caption: () => `The receipt for my manners with Claude: ${fmt(DATA.please + DATA.thanks)} nice words, $0.00 due 🧾` },

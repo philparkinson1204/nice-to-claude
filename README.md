@@ -51,13 +51,12 @@ The plugin's install folder changes with every update, so it keeps that small la
 
 ## Share your stats
 
-`/nice-to-claude share` opens a page in your browser with four cards, each 1080 × 1350 (the 4:5 size that shows uncropped on Instagram, X, LinkedIn, Threads and Bluesky):
+`/nice-to-claude share` opens a page in your browser with three cards, each 1080 × 1350 (the 4:5 size that shows uncropped on Instagram, X, LinkedIn, Threads and Bluesky):
 
 | Card | What's on it |
 |---|---|
 | Summary | your totals, every polite day for six months, your longest streak, favorite nice word, best month and a fun fact |
 | Milestone | your latest please or thank-you milestone as a good-manners sticker |
-| Streak | a gold star for every polite day in the last five weeks |
 | Receipt | an itemized receipt for your manners, total due $0.00, with a QR code to this plugin |
 
 Each card has **Download PNG**, **Copy image** and **Copy caption** buttons, plus links that open a post draft with the caption on X, Bluesky or Threads (you attach the card). LinkedIn only takes a link, so its button copies the caption for you to paste. There's also a one-page summary that prints on Letter or A4, or saves as a PDF from the print window.

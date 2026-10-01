@@ -1,7 +1,7 @@
 {
   "name": "nice-to-claude",
   "displayName": "Nice to Claude",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "description": "How polite are you to Claude? Counts every please and thank you you type into Claude Code, with a /nice-to-claude dashboard, a statusline counter, milestone messages and share cards. Local and context-aware.",
   "author": {
     "name": "Phil Parkinson"
