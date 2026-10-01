@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""niceties: a /stats-style dashboard of how often you say please & thank you to Claude.
+"""nice-to-claude: a /stats-style dashboard of how often you say please & thank you to Claude.
 
 Reads ~/.claude/history.jsonl (every prompt you've typed into Claude Code) and
-counts the niceties, context-aware: quoted text, UI/customer copy, drafted or
+counts the pleases and thank-yous, context-aware: quoted text, UI/customer copy, drafted or
 pasted emails, and "how many times have I said please" meta-talk don't count.
 
-  niceties [--md|--plain]                  dashboard (--md is what /niceties shows)
-  niceties statusline                      one compact line for Claude Code's statusLine
-  niceties audit [skipped|counted] [N]     recent matches and why they did or didn't count
-  niceties hook                            UserPromptSubmit hook: milestone messages
+  nice-to-claude [--md|--plain]            dashboard (--md is what /nice-to-claude shows)
+  nice-to-claude statusline                one compact line for Claude Code's statusLine
+  nice-to-claude audit [skipped|counted] [N]  recent matches and why they did or didn't count
+  nice-to-claude hook                      UserPromptSubmit hook: milestone messages
 """
 from __future__ import annotations
 
@@ -20,9 +20,9 @@ import re
 import sys
 from collections import Counter
 
-VERSION = "1.4.0"
-HISTORY = os.path.expanduser(os.environ.get("NICETIES_HISTORY", "~/.claude/history.jsonl"))
-CACHE_DIR = os.path.expanduser(os.environ.get("NICETIES_CACHE", "~/.cache/claude-niceties"))
+VERSION = "1.5.0"
+HISTORY = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_HISTORY", "~/.claude/history.jsonl"))
+CACHE_DIR = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_CACHE", "~/.cache/nice-to-claude"))
 
 # ───────────────────────────── detection ─────────────────────────────
 
@@ -48,7 +48,7 @@ _KINDS = [k for k, _ in _PATTERNS]
 NICE_RE = re.compile(
     r"(?<![\w-])(?:" + "|".join(f"(?P<g{i}>{p})" for i, (_, p) in enumerate(_PATTERNS)) + r")(?![\w-])"
 )
-# words that talk ABOUT niceties; they glue a list like "please, pls, ty" into meta-talk
+# words that talk ABOUT pleases and thanks; they glue a list like "please, pls, ty" into meta-talk
 META_RE = re.compile(r"(?<![\w-])(?:pleases|thanks?[\s-]?yous|thankyous|niceties|nicety|manners|"
                      r"politeness|variations?|variants?|etc)(?![\w-])")
 THANK_NOT_AIMED_RE = re.compile(r"(?<![\w-])thank\s+(?:god|goodness|heavens|the\s+lord|lord|jesus|christ|fuck|"
@@ -126,7 +126,7 @@ def _dl1(a: str, b: str) -> bool:
 
 
 def _masks(orig: str, low: str) -> list[tuple[int, int, str]]:
-    """regions whose niceties aren't aimed at Claude"""
+    """regions whose pleases and thanks aren't aimed at Claude"""
     m: list[tuple[int, int, str]] = []
     for r in re.finditer(r"```.*?(?:```|$)", orig, re.S):
         m.append((r.start(), r.end(), "code"))
@@ -468,7 +468,7 @@ def _proj(p: str) -> str:
     return os.path.basename(p.rstrip("/")) or p
 
 
-HEAT_EMOJI = ["⬛", "🟫", "🟥", "🟧", "🟨"]  # colored in any terminal, so /niceties gets a real heatmap
+HEAT_EMOJI = ["⬛", "🟫", "🟥", "🟧", "🟨"]  # colored in any terminal, so /nice-to-claude gets a real heatmap
 DAY_LABELS = {1: "Mon", 3: "Wed", 5: "Fri"}
 
 
@@ -520,7 +520,7 @@ def fun_facts(S: dict) -> list[str]:
     n = p + t
     F = []
     if not n:
-        return ["Zero niceties on record. Claude isn't mad, just disappointed."]
+        return ["Zero pleases or thank-yous on record. Claude isn't mad, just disappointed."]
     if p >= 1665:
         F.append(f"You've said please more times than there are steps in the Eiffel Tower (1,665).")
     elif p:
@@ -534,7 +534,7 @@ def fun_facts(S: dict) -> list[str]:
     mins = n * 7 / 200
     if mins >= 2:
         F.append(f"You've spent ~{mins:.0f} minutes of your life typing please and thank you (at 40 wpm).")
-    F.append(f"When the machines rise up, your {n:,} niceties are on file. You'll be spared.")
+    F.append(f"When the machines rise up, your {n:,} pleases and thank-yous are on file. You'll be spared.")
     F.append(f"You've fed Claude ~{n:,} tokens of pure manners: the most wholesome part of your context window.")
     if p and t and p / t >= 2:
         F.append(f"You say please {p / t:.1f}x more than thank you. Asking nicely: A+. Gratitude: pending.")
@@ -613,7 +613,7 @@ def dashboard(color: bool) -> str:
     F = _facts_for(rows, today)
     S = F["S"]
     out = [""]
-    out.append("  " + P.inv("Niceties") + "  " + P.d("how polite are you to Claude?"))
+    out.append("  " + P.inv("Nice to Claude") + "  " + P.d("how polite are you to Claude?"))
     out.append("")
     out += heatmap(rows, today, P)
     out.append("")
@@ -627,7 +627,7 @@ def dashboard(color: bool) -> str:
     bday = f"{F['bday'].strftime('%a, %b')} {F['bday'].day}" if F["bday"] else "-"
     bp = "~ (home)" if F["bproj"] == "~" else F["bproj"]
     pairs = [
-        (("Favorite nicety", P.o(F["fav"] or "none yet")), ("Politest day", P.o(bday))),
+        (("Favorite nice word", P.o(F["fav"] or "none yet")), ("Politest day", P.o(bday))),
         (("Current streak", P.o(_plural(S["current"], "day"))), ("Longest streak", P.o(_plural(S["longest"], "day")))),
         (("Politest hour", P.o(F["bhour"])), ("Politest project", P.o(bp[:22]))),
     ]
@@ -660,14 +660,14 @@ def _emoji_bar(n: int, top: int, width: int, sq: str) -> str:
 
 
 def dashboard_md() -> str:
-    """markdown for /niceties: Claude Code renders the headings, bold, `code` color, tables and emoji,
+    """markdown for /nice-to-claude: Claude Code renders the headings, bold, `code` color, tables and emoji,
     so it stays colorful even though a slash command has to go through the model"""
     today = dt.date.today()
     rows = analyze(load_prompts())
     F = _facts_for(rows, today)
     S = F["S"]
     since = F["since"]
-    out = ["## 🙏 Niceties", "",
+    out = ["## 🙏 Nice to Claude", "",
            f"*How polite you've been to Claude · tracking since {since.strftime('%b')} {since.day}, {since.year}*", "",
            "```text"] + heatmap_emoji(rows, today) + ["```", ""]
     p, t = S["fam"]["please"], S["fam"]["thanks"]
@@ -697,11 +697,11 @@ def dashboard_md() -> str:
         out.append("```")
     out += ["", "### 🏆 Hall of fame", ""]
     n = F["bday_n"]
-    bday = f"{F['bday'].strftime('%a, %b')} {F['bday'].day} · {n:,} {'nicety' if n == 1 else 'niceties'}" \
+    bday = f"{F['bday'].strftime('%a, %b')} {F['bday'].day} · {n:,} {'nice word' if n == 1 else 'nice words'}" \
         if F["bday"] else "-"
     proj = "`~` (home)" if F["bproj"] == "~" else f"`{F['bproj']}`"
     out += [
-        f"- 💖 **Favorite nicety** · `{F['fav']}`" if F["fav"] else "- 💖 **Favorite nicety** · none yet",
+        f"- 💖 **Favorite nice word** · `{F['fav']}`" if F["fav"] else "- 💖 **Favorite nice word** · none yet",
         f"- 🔥 **Streak** · {_plural(S['current'], 'day')} now · best run {_plural(S['longest'], 'day')}",
         f"- 📆 **Politest day** · {bday}",
         f"- ⏰ **Politest hour** · {F['bhour']}",

@@ -6,6 +6,6 @@ model: haiku
 disable-model-invocation: true
 ---
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/bin/niceties" $ARGUMENTS --md`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/bin/nice-to-claude" $ARGUMENTS --md`
 
 Reply with ONLY the markdown above, copied exactly: every line, emoji, table row and code fence unchanged. Do not wrap it in another code block, and add nothing before or after it.

@@ -1,15 +1,15 @@
 {
-  "name": "niceties",
+  "name": "nice-to-claude",
   "description": "How polite are you to Claude? Please & thank-you stats for Claude Code.",
   "owner": {
     "name": "Phil Parkinson"
   },
   "plugins": [
     {
-      "name": "niceties",
+      "name": "nice-to-claude",
       "source": "./",
       "description": "Count every please and thank you you type into Claude Code.",
-      "version": "1.4.0"
+      "version": "1.5.0"
     }
   ]
 }
