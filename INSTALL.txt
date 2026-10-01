@@ -1,0 +1,20 @@
+nice-to-claude 1.1.0: how polite are you to Claude?
+====================================================
+
+Needs Claude Code and Python 3.8+ (already on every Mac).
+
+1. Unzip this into your home folder, so you end up with ~/nice-to-claude
+
+2. In a terminal, run:
+
+     claude plugin marketplace add ~/nice-to-claude
+     claude plugin install nice-to-claude@nice-to-claude
+
+3. Restart Claude Code and type /nice-to-claude
+
+Optional statusline counter: see "Statusline" in README.md.
+
+Everything runs on your own machine. It reads ~/.claude/history.jsonl
+and keeps a small counts-only cache in ~/.cache/nice-to-claude/.
+
+To uninstall: claude plugin uninstall nice-to-claude@nice-to-claude

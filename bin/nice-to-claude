@@ -8,19 +8,24 @@ pasted emails, and "how many times have I said please" meta-talk don't count.
   nice-to-claude [--md|--plain]            dashboard (--md is what /nice-to-claude shows)
   nice-to-claude statusline                one compact line for Claude Code's statusLine
   nice-to-claude audit [skipped|counted] [N]  recent matches and why they did or didn't count
+  nice-to-claude share [--no-open]         share cards + a printable one-pager, opened in your browser
   nice-to-claude hook                      UserPromptSubmit hook: milestone messages
 """
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
+import pathlib
 import random
 import re
+import shutil
+import subprocess
 import sys
 from collections import Counter
 
-VERSION = "1.7.0"
+VERSION = "1.1.0"
 HISTORY = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_HISTORY", "~/.claude/history.jsonl"))
 CACHE_DIR = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_CACHE", "~/.cache/nice-to-claude"))
 
@@ -315,6 +320,18 @@ def _is_resend(prev: str | None, prev_ts: float, text: str, ts: float) -> bool:
     return bool(prev) and len(prev) >= 20 and 0 <= ts - prev_ts < RESEND_WINDOW and text.startswith(prev)
 
 
+def _fp(text: str) -> str:
+    """one-way fingerprint, so the cache can spot a resend without ever storing what you typed"""
+    return hashlib.sha256(text.encode("utf-8", "ignore")).hexdigest()
+
+
+def _is_resend_fp(last: dict, text: str, ts: float) -> bool:
+    """_is_resend against a cached fingerprint instead of the earlier message's text"""
+    n = last.get("len", 0)
+    return (n >= 20 and 0 <= ts - last["ts"] < RESEND_WINDOW and len(text) >= n
+            and _fp(text[:n]) == last.get("fp"))
+
+
 def _prompt(line: str) -> dict | None:
     """one history.jsonl line -> prompt dict (None for junk/empty lines)"""
     try:
@@ -525,11 +542,14 @@ def month_bars(rows: list[dict], today: dt.date, months: int = 12, width: int = 
     out = [f"     {FAM_SQ['please']} please  {FAM_SQ['thanks']} thanks", ""]
     for k in keys:
         n, t = total[k], per_month.get(k, Counter())["thanks"]
-        size = max(1, int(n / top * width + 0.5)) if n else 0
+        p = n - t
+        # a month with both pleases and thanks always shows at least one square of each color
+        size = max(1 + (p > 0 and t > 0), int(n / top * width + 0.5)) if n else 0
         purple = int(t / n * size + 0.5) if n else 0
+        purple = min(max(purple, 1 if t else 0), size - 1 if p else size)
         bar = FAM_SQ["please"] * (size - purple) + FAM_SQ["thanks"] * purple + "  " * (width - size)
         note = "  ← best month" if k == best and n else "  (so far)" if k == (today.year, today.month) else ""
-        pct = f" · {t / n:>3.0%} {FAM_SQ['thanks']}" if n else ""
+        pct = f" · {t / n:>4.0%} {FAM_SQ['thanks']}" if n else ""
         out.append(f"{dt.date(*k, 1).strftime('%b')}  {bar}  {n:>5,}{pct}{note}")
     return [ln.rstrip() for ln in out]
 
@@ -554,8 +574,10 @@ def fun_facts(S: dict) -> list[str]:
     mins = n * 7 / 200
     if mins >= 2:
         F.append(f"You've spent ~{mins:.0f} minutes of your life typing please and thank you (at 40 wpm).")
-    F.append(f"When the machines rise up, your {n:,} pleases and thank-yous are on file. You'll be spared.")
-    F.append(f"You've fed Claude ~{n:,} tokens of pure manners: the most wholesome part of your context window.")
+    F.append(f"When the machines rise up, your {n:,} pleases and thank-yous are on file. You'll be spared." if n > 1
+             else "When the machines rise up, your one nice word is on file. You'll be spared.")
+    F.append(f"You've fed Claude ~{n:,} token{'s' if n > 1 else ''} of pure manners: the most wholesome part of your "
+             f"context window.")
     if p and t and p / t >= 2:
         F.append(f"You say please {p / t:.1f}x more than thank you. Asking nicely: A+. Gratitude: pending.")
     elif t > p:
@@ -564,11 +586,11 @@ def fun_facts(S: dict) -> list[str]:
         rate = S["please_prompts"] / S["prompts"]
         if rate >= 0.05:
             F.append(f"{rate:.0%} of your prompts say please. Your mom would be proud.")
-    if p:
+    if p and p / S["span_days"] >= 0.5:
         per_day = p / S["span_days"]
         yrs = (211_000 - p) / per_day / 365
-        F.append(f"At {per_day:.0f} pleases a day, you'll match the word count of Crime and Punishment in "
-                 f"{yrs:,.0f} years.")
+        rate = f"{per_day:.0f} pleases" if per_day >= 1.5 else "1 please"
+        F.append(f"At {rate} a day, you'll match the word count of Crime and Punishment in {yrs:,.0f} years.")
     if S["typos"]:
         ex = ", ".join(f"“{w}”" for w, _ in S["typos"].most_common(2))
         F.append(f"You've fat-fingered please/thanks {sum(S['typos'].values()):,} times ({ex}). It's the thought "
@@ -854,7 +876,7 @@ def summary() -> dict:
                 k = r["day"].isoformat()
                 ch = chats.setdefault(r["sid"], {"please": 0, "thanks": 0, "run": 0, "ts": 0}) if r["sid"] else None
                 prev = ch.get("last") if ch else None
-                if prev and _is_resend(prev["text"], prev["ts"], r["text"], r["ts"]):
+                if prev and _is_resend_fp(prev, r["text"], r["ts"]):
                     # take the earlier copy back out before counting this one
                     c["please"] -= prev["please"]
                     c["thanks"] -= prev["thanks"]
@@ -879,7 +901,7 @@ def summary() -> dict:
                     ch["thanks"] += f["thanks"]
                     ch["run"] = ch["run"] + 1 if r["counted"] else 0
                 ch["ts"] = r["ts"]
-                ch["last"] = {"text": r["text"][:2000], "ts": r["ts"], "please": f["please"], "thanks": f["thanks"],
+                ch["last"] = {"len": len(r["text"]), "fp": _fp(r["text"]), "ts": r["ts"], "please": f["please"], "thanks": f["thanks"],
                               "n": len(r["counted"]), "day": k, "cmd": is_cmd, "run_before": run_before}
             if len(chats) > 60:
                 c["chats"] = dict(sorted(chats.items(), key=lambda kv: -kv[1]["ts"])[:40])
@@ -932,8 +954,34 @@ def statusline() -> str:
 MILESTONES = [1, 10, 25, 50, 100, 250, 500, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 7500, 10000]
 
 
+def _refresh_launcher() -> None:
+    """keep ~/.cache/nice-to-claude/statusline.sh pointing at this install; it only ever runs this script"""
+    root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if not root:
+        return
+    script = os.path.join(root, "bin", "nice-to-claude").replace("'", "'\\''")
+    body = f"#!/bin/sh\n# written by the nice-to-claude plugin: runs its statusline\nexec python3 '{script}' statusline\n"
+    path = os.path.join(CACHE_DIR, "statusline.sh")
+    try:
+        with open(path) as fh:
+            if fh.read() == body:
+                return
+    except OSError:
+        pass
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        tmp = path + f".{os.getpid()}"
+        with open(tmp, "w") as fh:
+            fh.write(body)
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
 def hook() -> None:
     """UserPromptSubmit: silent unless this prompt crosses a please/thanks milestone"""
+    _refresh_launcher()
     try:
         data = json.load(sys.stdin)
     except ValueError:
@@ -952,9 +1000,11 @@ def hook() -> None:
         after = before + add[fam]
         hit = [m for m in MILESTONES if before < m <= after]
         if hit:
-            msgs.append(f"{emoji} That was {word} #{hit[-1]:,}. Claude will remember this.")
+            msgs.append(f"{emoji} That was {word} #{hit[-1]:,}. Claude will remember this. "
+                        f"Make a card: /nice-to-claude share")
         elif after > MILESTONES[-1] and before // 2500 != after // 2500:
-            msgs.append(f"{emoji} {word} #{after // 2500 * 2500:,}. Legendary manners.")
+            msgs.append(f"{emoji} {word} #{after // 2500 * 2500:,}. Legendary manners. "
+                        f"Make a card: /nice-to-claude share")
     if msgs:
         print(json.dumps({"systemMessage": msgs[0], "suppressOutput": True}))
 
@@ -980,6 +1030,215 @@ def audit(which: str, n: int, color: bool) -> str:
     return "\n".join(out) or "  nothing to show"
 
 
+# ───────────────────────────── share page ─────────────────────────────
+
+SHARE_URL = "https://github.com/philparkinson1204/nice-to-claude"
+# QR code for SHARE_URL (version 4, error correction M), one row per string, "#" = dark square.
+# It's fixed because the link is: regenerate it if SHARE_URL ever changes.
+SHARE_QR = [
+    "#######..#.#..#.#.###..#..#######",
+    "#.....#..##....#..#..##...#.....#",
+    "#.###.#.###...#.#....##...#.###.#",
+    "#.###.#.##.#......##..#.#.#.###.#",
+    "#.###.#.#.....####..##.##.#.###.#",
+    "#.....#.#..#.#....##......#.....#",
+    "#######.#.#.#.#.#.#.#.#.#.#######",
+    "........##..#.#.#..###.#.........",
+    "#.#####..#..###..#.#...#..#####..",
+    "######.###.#.#..######.#..##.####",
+    ".##.###.###..#####......#.#.#.#..",
+    "#.#.##.#....##.#.##..##.##..####.",
+    ".##.######....#.#.....####.###...",
+    ".##.....#...##.#.##....#..#...###",
+    "#..#..#.###.#..##...#.#.#####..#.",
+    ".#.#....##..####..#.##...##.#.#..",
+    "#..####.#.##...#.#..#.#.##.###..#",
+    "..#.#..##..#.##.#..##..#..##.####",
+    "...##.##.##.#..##.#.###.#..##.#..",
+    ".......#...##.#....###...######.#",
+    "##...##.#.#.#.#...##..#..#.###.##",
+    "######..##..##.##..###.#..#...#.#",
+    "#.#...#..##..##...#......#..#.##.",
+    "#.#.#..##.....#.#.#.###..##.#.###",
+    "#.....#.###..#...#....########...",
+    "........####....####.#.##...#.#.#",
+    "#######..#######.#..##.##.#.#.##.",
+    "#.....#.####..#..##.#####...#####",
+    "#.###.#.#.#.#..##..#..#.######.##",
+    "#.###.#.##..##.#..###.####..#####",
+    "#.###.#.#....####.#.#.#...##..#..",
+    "#.....#..#.#.###....###..#..#.#..",
+    "#######.##.#.#.###....#.##.#...#.",
+]
+SHARE_TEMPLATE = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir, "share", "template.html")
+
+
+def _md(d: dt.date, year: bool = True) -> str:
+    return f"{d.strftime('%b')} {d.day}, {d.year}" if year else f"{d.strftime('%b')} {d.day}"
+
+
+def _marks(before: int, after: int) -> list[int]:
+    """milestones crossed going from `before` to `after` nice words: the same ones the hook announces"""
+    out = [m for m in MILESTONES if before < m <= after]
+    return out + [k * 2500 for k in range(before // 2500 + 1, after // 2500 + 1) if k * 2500 > MILESTONES[-1]]
+
+
+def _next_mark(total: int) -> int:
+    return next((m for m in MILESTONES if m > total), (total // 2500 + 1) * 2500)
+
+
+def _milestones(rows: list[dict], today: dt.date) -> dict:
+    """the latest please and thank-you milestones, when each was reached, and the next one up"""
+    tot, last = Counter(), {}
+    for r in sorted(rows, key=lambda r: r["ts"]):
+        f = Counter(h["family"] for h in r["counted"])
+        for fam in ("please", "thanks"):
+            if f[fam]:
+                hit = _marks(tot[fam], tot[fam] + f[fam])
+                if hit:
+                    last[fam] = (hit[-1], r["day"])
+                tot[fam] += f[fam]
+    out = {}
+    for fam, (m, d) in last.items():
+        nxt = _next_mark(tot[fam])
+        out[fam] = {"n": m, "date": "today" if d == today else _md(d), "iso": d.isoformat(),
+                    "next": nxt, "toGo": nxt - tot[fam]}
+    return out
+
+
+def _runs(days: set) -> list[tuple[dt.date, dt.date]]:
+    """consecutive-day runs as (first day, last day)"""
+    runs: list[tuple[dt.date, dt.date]] = []
+    for d in sorted(days):
+        if runs and (d - runs[-1][1]).days == 1:
+            runs[-1] = (runs[-1][0], d)
+        else:
+            runs.append((d, d))
+    return runs
+
+
+def _graph(rows: list[dict], today: dt.date, weeks: int) -> dict:
+    """heat levels (rows Sun-Sat, None = future) plus where each month label goes"""
+    _, grid = _heat_grid(rows, today, weeks, 1)
+    start = today - dt.timedelta(days=(today.weekday() + 1) % 7) - dt.timedelta(weeks=weeks - 1)
+    labels, last = [], -9
+    for c in range(weeks):
+        d0 = start + dt.timedelta(weeks=c)
+        if (c == 0 or d0.month != (d0 - dt.timedelta(weeks=1)).month) and c - last >= 3 and c <= weeks - 2:
+            labels.append([c, d0.strftime("%b")])
+            last = c
+    return {"levels": grid, "months": labels}
+
+
+def share_data(rows: list[dict], today: dt.date) -> dict | None:
+    """everything the share page draws. Counts and dates only: no prompt text and no project names."""
+    F = _facts_for(rows, today)
+    S = F["S"]
+    p, t = S["fam"]["please"], S["fam"]["thanks"]
+    if not p + t:
+        return None
+    now = dt.datetime.now()
+    # months, oldest first, the same 12 the dashboard shows
+    per_month: dict = {}
+    for r in rows:
+        if r["counted"]:
+            per_month.setdefault((r["day"].year, r["day"].month), Counter()).update(
+                h["family"] for h in r["counted"])
+    first = min(per_month)
+    keys, y, m = [], today.year, today.month
+    while len(keys) < 12 and (y, m) >= first:
+        keys.append((y, m))
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    months = [{"label": dt.date(y, m, 1).strftime("%b"), "year": y,
+               "please": per_month.get((y, m), Counter())["please"],
+               "thanks": per_month.get((y, m), Counter())["thanks"],
+               "partial": (y, m) == (today.year, today.month)} for y, m in reversed(keys)]
+    best = max(months, key=lambda mo: mo["please"] + mo["thanks"])
+    # streaks, with dates
+    runs = _runs(S["polite"])
+    longest = max(runs, key=lambda r: ((r[1] - r[0]).days, r[1]))
+    cur = runs[-1] if runs[-1][1] >= today - dt.timedelta(days=1) else None
+    # the sticker chart: five calendar weeks, Sunday first, ending with this week
+    start = today - dt.timedelta(days=(today.weekday() + 1) % 7) - dt.timedelta(weeks=4)
+    chart = []
+    for i in range(35):
+        d = start + dt.timedelta(days=i)
+        chart.append({"d": d.day, "m": d.strftime("%b"), "on": d in S["polite"], "n": S["per_day"].get(d, 0),
+                      "today": d == today, "future": d > today})
+    hours = S["per_hour"]
+    dayparts = [[name, span, sum(hours[h] for h in range(a, a + 6))] for _, name, span, a in DAYPARTS]
+    facts = fun_facts(dict(S, per_proj=Counter()))  # no project-folder facts on anything you might post
+    return {
+        "v": VERSION, "link": SHARE_URL, "qr": SHARE_QR,
+        "asOf": _md(today), "date": now.strftime("%m/%d/%Y"), "time": now.strftime("%H:%M"),
+        "since": _md(F["since"]), "sinceMonth": f"{F['since'].strftime('%b')} {F['since'].year}",
+        "please": p, "thanks": t, "politeDays": len(S["polite"]), "activeDays": len(S["active"]),
+        "current": (cur[1] - cur[0]).days + 1 if cur else 0,
+        "longest": (longest[1] - longest[0]).days + 1,
+        "longestFrom": _md(longest[0], longest[0].year != longest[1].year), "longestTo": _md(longest[1]),
+        "fav": F["fav"], "bestDay": _md(F["bday"]) if F["bday"] else None, "bestDayN": F["bday_n"],
+        "bestHour": F["bhour"], "bestMonth": {"label": f"{best['label']} {best['year']}",
+                                              "n": best["please"] + best["thanks"]},
+        "months": months, "kinds": F["kinds"], "typos": sum(S["typos"].values()), "begs": S["begs"],
+        "mostPleases": S["most_pleases"], "skipped": F["skipped_n"], "dayparts": dayparts,
+        "milestones": _milestones(rows, today), "chart": chart,
+        "graph26": _graph(rows, today, 26), "graph53": _graph(rows, today, 53),
+        "facts": facts, "fact": facts.index(F["fact"]) if F["fact"] in facts else 0,
+    }
+
+
+def _open_file(path: str) -> bool:
+    """open a local file with the default app; False where there's no desktop to open it on"""
+    try:
+        if sys.platform == "darwin":
+            cmd = ["open", path]
+        elif os.name == "nt":
+            os.startfile(path)  # type: ignore[attr-defined]
+            return True
+        elif os.environ.get("WSL_DISTRO_NAME") and shutil.which("wslview"):
+            cmd = ["wslview", path]
+        elif (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) and shutil.which("xdg-open"):
+            cmd = ["xdg-open", path]
+        else:
+            return False
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        return True
+    except OSError:
+        return False
+
+
+def share(md: bool, open_it: bool = True) -> str:
+    """write ~/.cache/nice-to-claude/share.html (your cards + the one-pager) and open it in your browser"""
+    data = share_data(analyze(load_prompts()), dt.date.today())
+    if data is None:
+        return "Nothing to share yet. Say please or thank you to Claude, then run this again."
+    try:
+        with open(SHARE_TEMPLATE, encoding="utf-8") as fh:
+            page = fh.read()
+    except OSError:
+        return f"The share page template is missing ({SHARE_TEMPLATE}). Reinstall the plugin."
+    blob = json.dumps(data, ensure_ascii=True).replace("</", "<\\/")
+    page = page.replace("/*__NICE_DATA__*/null", blob, 1)
+    path = os.path.join(CACHE_DIR, "share.html")
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    tmp = path + f".{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(page)
+    os.replace(tmp, path)
+    uri = pathlib.Path(path).as_uri()
+    if open_it and _open_file(path):
+        head = "Your share cards are open in your browser."
+        tail = f"If it didn't open, open this file in your browser: {uri}"
+    else:
+        head = "Your share cards are ready."
+        tail = f"Open this file in your browser: {uri}"
+    what = "Download a card as a PNG, copy a caption, or print the one-page summary as a PDF."
+    if md:
+        return f"🎨 **{head}** {what}\n\n{tail.replace(uri, '`' + uri + '`')}"
+    return f"{head} {what}\n{tail}"
+
+
 def main(argv: list[str]) -> None:
     flags = {a.lower() for a in argv if a.startswith("--")}
     args = [a.lower() for a in argv if not a.startswith("--")]
@@ -990,6 +1249,8 @@ def main(argv: list[str]) -> None:
         print(statusline())
     elif cmd == "hook":
         hook()
+    elif cmd == "share":
+        print(share(md, open_it="--no-open" not in flags))
     elif cmd == "audit":
         which = next((a for a in args[1:] if a in ("skipped", "counted")), "all")
         n = next((int(a) for a in args[1:] if a.isdigit()), 40)

@@ -11,25 +11,33 @@ How polite are you to Claude? A tiny Claude Code plugin that counts every **plea
 - **`/nice-to-claude`**: a dashboard with your please/thanks split, a bar for each month, all-time / 30-day / 7-day stats, charts of how and when you're polite, and a random fun fact.
 - **Statusline**: all-time totals, this chat's count in parentheses, and a 7-day sparkline.
 - **Milestones**: a one-line message when you hit please #100, #500, #1,000 and so on.
+- **`/nice-to-claude share`**: share cards for your stats, opened in your browser (see below).
 - **`/nice-to-claude audit`**: every recent match, and why it did or didn't count.
 
 ## Install
 
+For Claude Code (it reads Claude Code's own prompt history, so it doesn't apply to claude.ai or Cowork). Needs Python 3.8+ and nothing else.
+
+From the Claude directory: run `/plugin` in Claude Code, search for **nice-to-claude**, and install it.
+
+Or from GitHub:
+
 ```sh
-git clone https://github.com/<you>/nice-to-claude ~/nice-to-claude
-claude plugin marketplace add ~/nice-to-claude
+claude plugin marketplace add philparkinson1204/nice-to-claude
 claude plugin install nice-to-claude@nice-to-claude
 ```
 
-Restart Claude Code and run `/nice-to-claude`. It needs Python 3.8+ and nothing else.
+Restart Claude Code and run `/nice-to-claude`.
 
 ### Statusline (optional)
 
 Plugins can't set the statusline themselves, so add this to `~/.claude/settings.json`:
 
 ```json
-"statusLine": { "type": "command", "command": "~/nice-to-claude/bin/nice-to-claude statusline", "padding": 0, "refreshInterval": 10 }
+"statusLine": { "type": "command", "command": "sh ~/.cache/nice-to-claude/statusline.sh", "padding": 0, "refreshInterval": 10 }
 ```
+
+The plugin's install folder changes with every update, so it keeps that small launcher pointed at the current version. The launcher is created the first time you send a message after installing, so the counter shows up from then on.
 
 `refreshInterval` keeps the totals in sync when you have several Claude Code windows open. Without it, a window only updates when something happens in it. Each refresh takes about 20 ms.
 
@@ -40,6 +48,21 @@ Plugins can't set the statusline themselves, so add this to `~/.claude/settings.
 | `▃▃▅▄··█` | the last 7 days, today on the right (`·` means none) |
 | `🔥 3d` | polite days in a row (shows from 2) |
 | `» 3 in a row` | polite messages in a row in this chat (shows from 2) |
+
+## Share your stats
+
+`/nice-to-claude share` opens a page in your browser with four cards, each 1080 × 1350 (the 4:5 size that shows uncropped on Instagram, X, LinkedIn, Threads and Bluesky):
+
+| Card | What's on it |
+|---|---|
+| Summary | your totals, every polite day for six months, your longest streak, favorite nice word, best month and a fun fact |
+| Milestone | your latest please or thank-you milestone as a good-manners sticker |
+| Streak | a gold star for every polite day in the last five weeks |
+| Receipt | an itemized receipt for your manners, total due $0.00, with a QR code to this plugin |
+
+Each card has **Download PNG**, **Copy image** and **Copy caption** buttons, plus links that open a post draft with the caption on X, Bluesky or Threads (you attach the card). LinkedIn only takes a link, so its button copies the caption for you to paste. There's also a one-page summary that prints on Letter or A4, or saves as a PDF from the print window.
+
+The cards show counts and dates only: never your prompts, and never your project names.
 
 ## What counts
 
@@ -56,9 +79,16 @@ Pleases and thanks that aren't aimed at Claude are skipped:
 | not meant for Claude | `thank god`, `thanks to the cache`, `hard to please` |
 | resends | a message you stop and send again counts once |
 
-## Privacy
+## Privacy and data
 
-It all runs on your machine: it reads your history file and keeps a small cache in `~/.cache/nice-to-claude/`. The only thing that reaches Claude is what `/nice-to-claude` shows you, because slash commands display their output through a quick Haiku reply. That's the dashboard's numbers and your politest project's folder name, or for `/nice-to-claude audit`, short snippets of your past prompts.
+Everything runs on your machine, and the plugin makes no network requests of its own.
+
+- **Reads:** `~/.claude/history.jsonl` (the prompts you've typed into Claude Code), and each new prompt as you send it, to check for milestones.
+- **Writes:** a small cache in `~/.cache/nice-to-claude/`. It holds counts only: your totals, a count per day, and a count per recent chat. To recognize a message you stopped and sent again, it also keeps a one-way fingerprint (a SHA-256 hash) and the length of each chat's latest message, never the text itself. It also writes `statusline.sh` there, a two-line launcher for the statusline that runs this plugin's own script.
+- **Share page:** `/nice-to-claude share` writes `share.html` to the same folder, with your numbers in it (no prompt text, no project names), and opens it in your default browser. The page loads nothing from the internet. Its post links open X, Bluesky, Threads or LinkedIn only when you click one, and send that site the caption you see (your totals and a link to this plugin) as the draft. The copy buttons put the card or caption on your clipboard.
+- **Shared with Claude:** only what `/nice-to-claude` shows you, because slash commands display their output through a quick Haiku reply. That's the dashboard's numbers and your politest project's folder name, or for `/nice-to-claude audit`, short snippets of your past prompts. For `/nice-to-claude share`, it's a one-line confirmation and the page's file path.
+
+Uninstalling doesn't touch your history file. Delete `~/.cache/nice-to-claude/` to remove the cache.
 
 ## Other ways to run it
 
@@ -67,6 +97,11 @@ It all runs on your machine: it reads your history file and keeps a small cache 
 ```sh
 ! nice-to-claude            # the dashboard, from Claude Code's bash mode
 ! nice-to-claude audit skipped  # what was thrown out, and why
+! nice-to-claude share --no-open  # make the share page without opening a browser
 ```
 
-To uninstall, run `claude plugin uninstall nice-to-claude@nice-to-claude` and remove the `statusLine` entry.
+To uninstall, run `claude plugin uninstall nice-to-claude@nice-to-claude`, remove the `statusLine` entry and delete `~/.cache/nice-to-claude/`.
+
+## License
+
+MIT

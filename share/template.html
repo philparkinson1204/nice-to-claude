@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nice to Claude: share your manners</title>
+<!--
+  The nice-to-claude share page. `nice-to-claude share` copies this file to
+  ~/.cache/nice-to-claude/share.html with your numbers filled in below (DATA).
+  Everything is drawn here, in your browser: no fonts, scripts or images load from
+  the internet. The only links out are the post buttons, and they open only when you
+  click them.
+-->
+<style>
+  :root {
+    --bg: #F6F3FB; --ink: #1E1433; --muted: #655A7C; --line: #E0D8F0; --accent: #7B4DEA;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: "SF Mono", ui-monospace, Menlo, Monaco, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #160F24; --ink: #F3EEFF; --muted: #ADA2CB; --line: #352B4F; --accent: #A688FF; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--sans); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 48px 20px 72px; }
+  .mark { font-family: var(--mono); font-size: 15px; color: var(--muted); margin: 0 0 14px; }
+  h1 { font-size: clamp(38px, 6vw, 60px); line-height: 1.02; letter-spacing: -0.025em; font-weight: 800; margin: 0 0 14px; }
+  .lede { max-width: 58ch; margin: 0; color: var(--muted); font-size: 18px; }
+  .hint { max-width: 70ch; margin: 18px 0 0; color: var(--muted); font-size: 15px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 56px 40px; margin: 44px 0 0; padding: 0; list-style: none; }
+  .card h2 { font-size: 22px; letter-spacing: -0.01em; margin: 0; }
+  .card .desc { margin: 2px 0 14px; color: var(--muted); }
+  .card canvas { display: block; width: 100%; height: auto; border-radius: 12px; box-shadow: 0 18px 40px -26px rgba(20, 8, 40, 0.55); }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+  .caption { margin: 14px 0 0; padding-left: 14px; border-left: 3px solid var(--line); color: var(--ink); font-size: 15px; }
+  .post { margin-top: 10px; font-size: 15px; color: var(--muted); }
+  .post a { color: var(--ink); font-weight: 600; margin-left: 10px; text-underline-offset: 3px; }
+  .post a:first-of-type { margin-left: 6px; }
+
+  button { font: inherit; font-size: 15px; font-weight: 600; line-height: 1; padding: 11px 16px; border-radius: 999px;
+           border: 1.5px solid var(--ink); background: transparent; color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--ink); color: var(--bg); }
+  button.quiet { border-color: var(--line); }
+  button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+  button:hover { box-shadow: 0 0 0 3px var(--line); }
+  button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .seg { display: inline-flex; gap: 6px; }
+
+  .print-block { margin-top: 96px; }
+  .print-intro { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px 32px; margin-bottom: 28px; }
+  .print-intro h2 { font-size: 30px; letter-spacing: -0.02em; line-height: 1.1; margin: 0 0 6px; }
+  .print-intro p { color: var(--muted); margin: 0; }
+  .paper-wrap { overflow-x: auto; padding: 4px 4px 24px; }
+  .paper { background: #fff; width: max-content; margin: 0 auto; padding: 12mm; box-shadow: 0 1px 0 rgba(30, 20, 51, 0.06), 0 24px 48px -28px rgba(20, 8, 40, 0.5); }
+
+  .foot { margin-top: 56px; color: var(--muted); font-size: 14px; }
+  .foot a { color: inherit; }
+  .empty { max-width: 52ch; font-size: 18px; }
+
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 16px); opacity: 0; pointer-events: none;
+           background: var(--ink); color: var(--bg); padding: 12px 18px; border-radius: 12px; font-weight: 600; font-size: 15px;
+           max-width: calc(100vw - 32px); transition: opacity .18s ease, transform .18s ease; }
+  #toast.on { opacity: 1; transform: translate(-50%, 0); }
+  @media (prefers-reduced-motion: reduce) { #toast { transition: none; } }
+
+  /* ── the one-page summary: sized to fit Letter and A4 inside 12 mm margins ── */
+  #sheet { width: 186mm; color: #1E1433; background: #fff; font: 9.5pt/1.35 var(--sans); font-variant-numeric: tabular-nums; }
+  #sheet .s-top { display: flex; justify-content: space-between; color: #6E6386; font-size: 8.5pt; }
+  #sheet .s-top .s-mark { font-family: var(--mono); }
+  #sheet h2 { font-size: 27pt; line-height: 1; letter-spacing: -0.025em; font-weight: 800; margin: 4mm 0 2mm; }
+  #sheet .s-lede { font-size: 12pt; line-height: 1.35; margin: 0; max-width: 160mm; }
+  #sheet h3 { font-size: 10.5pt; font-weight: 700; margin: 0 0 2mm; letter-spacing: -0.005em; }
+  #sheet section { margin-top: 5mm; }
+  #sheet .s-head { display: flex; justify-content: space-between; align-items: baseline; }
+  #sheet .s-legend { font-size: 7.5pt; color: #6E6386; display: flex; align-items: center; gap: 1mm; }
+  #sheet .s-legend i { display: inline-block; width: 2.6mm; height: 2.6mm; border-radius: .5mm; }
+  #sheet .s-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10mm; }
+  #sheet .s-split-labels { display: flex; justify-content: space-between; margin-top: 1.6mm; font-size: 9.5pt; }
+  #sheet .s-split-labels span { display: inline-flex; align-items: center; gap: 1.6mm; }
+  #sheet .sw { display: inline-block; width: 3mm; height: 3mm; border-radius: .6mm; }
+  #sheet .s-bars { display: grid; grid-template-columns: 27mm 1fr 11mm; align-items: center; row-gap: 1.3mm; column-gap: 2mm; }
+  #sheet .s-bars .l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sheet .s-bars .l small { color: #6E6386; font-size: 7.5pt; margin-left: 1mm; }
+  #sheet .s-bars .v { text-align: right; }
+  #sheet .s-track { height: 2.6mm; }
+  #sheet .s-track b { display: block; height: 100%; border-radius: 0 1mm 1mm 0; min-width: .6mm; }
+  #sheet dl { display: grid; grid-template-columns: auto 1fr; gap: 1.2mm 4mm; margin: 0; }
+  #sheet dt { color: #6E6386; }
+  #sheet dd { margin: 0; font-weight: 650; }
+  #sheet .s-note { font-size: 7.5pt; color: #6E6386; margin: 1mm 0 0; }
+  #sheet .s-fact { font-size: 12pt; line-height: 1.4; font-style: italic; margin: 0; max-width: 165mm; }
+  #sheet footer { display: flex; align-items: center; gap: 5mm; margin-top: 5mm; padding-top: 4mm; border-top: .3mm solid #E3DCF0; }
+  #sheet footer strong { display: block; font-size: 11pt; }
+  #sheet footer span { color: #4A4060; }
+
+  @page { margin: 12mm; }
+  @media print {
+    html, body { background: #fff !important; }
+    .wrap { max-width: none; padding: 0; }
+    .wrap > *:not(main), main > *:not(.print-block), .print-intro, #toast { display: none !important; }
+    .print-block { display: block; margin: 0; }
+    .paper-wrap { overflow: visible; padding: 0; }
+    .paper { padding: 0; box-shadow: none; width: auto; }
+    #sheet { break-inside: avoid; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="mark">/nice-to-claude</p>
+    <h1>Share your manners</h1>
+    <p class="lede">Four cards and a one-page summary, made on your computer from your Claude Code history. Nothing leaves this page unless you post it.</p>
+    <p class="hint" id="hint">Download a card, then use a post link: it opens a draft with the caption filled in, and you attach the card. LinkedIn only takes the link, so the caption is copied for you to paste.</p>
+  </header>
+  <main id="main">
+    <ul class="cards" id="cards" aria-label="Share cards"></ul>
+    <section class="print-block" id="print-block" aria-labelledby="print-title">
+      <div class="print-intro">
+        <div>
+          <h2 id="print-title">One-page summary</h2>
+          <p>Fits on Letter or A4. To keep a PDF, choose Save as PDF in the print window.</p>
+        </div>
+        <button class="primary" id="print-btn" type="button">Print or save as PDF</button>
+      </div>
+      <div class="paper-wrap"><div class="paper"><article id="sheet" aria-label="One-page summary"></article></div></div>
+    </section>
+  </main>
+  <p class="foot">Made with <a id="foot-link" href="#">nice-to-claude</a>, a free Claude Code plugin.</p>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+const DATA = /*__NICE_DATA__*/null;
+
+/* ── tokens ─────────────────────────────────────────────────────────────── */
+const W = 1080, H = 1350, M = 84;
+const C = {
+  grape: "#25163F", onDark: "#F6F1FF", onDarkMuted: "#B9ADD8", onDarkSoft: "#E4DCF7",
+  lilac: "#F2ECFF", ink: "#1E1433", inkMuted: "#655A7C", line: "#DCD2F0", paper: "#FFFFFF",
+  pleaseL: "#D9620F", thanksL: "#7B4DEA", pleaseD: "#E36A16", thanksD: "#9467F7",
+  rampD: ["#322843", "#69391C", "#9E511E", "#D66919", "#FF9550"],
+  rampL: ["#EFEDF6", "#F9D6BF", "#F0AD7F", "#DD7B2B", "#B45600"],
+  gold: "#FFC53D", goldEdge: "#D99A00", streakTint: "#FFF4D6",
+  field: { please: "#E8681A", thanks: "#7B4DEA" }, fieldInk: { please: "#2B1305", thanks: "#FFFFFF" },
+  sticker: "#FFF8EE", receiptField: "#6B3FDB",
+};
+const FONT = {
+  sans: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif',
+  mono: '"SF Mono", ui-monospace, Menlo, Monaco, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace',
+};
+
+/* ── helpers ────────────────────────────────────────────────────────────── */
+const fmt = n => Number(n).toLocaleString("en-US");
+const times = n => (n === 1 ? "time" : "times");
+const days = n => (n === 1 ? "day" : "days");
+const linkShort = () => DATA.link.replace(/^https?:\/\//, "");
+function font(ctx, weight, size, fam = "sans", style = "normal") { ctx.font = `${style} ${weight} ${size}px ${FONT[fam]}`; }
+function track(ctx, px) { if ("letterSpacing" in ctx) ctx.letterSpacing = `${px}px`; }
+function wrap(ctx, text, maxW) {
+  const words = String(text).split(/\s+/).filter(Boolean), lines = [];
+  let line = "";
+  for (const w of words) {
+    const test = line ? line + " " + w : w;
+    if (!line || ctx.measureText(test).width <= maxW) line = test;
+    else { lines.push(line); line = w; }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+/* the biggest size (stepping down) at which `text` wraps into maxLines or fewer */
+function fitWrap(ctx, text, maxW, maxLines, size, min, weight, fam = "sans", style = "normal") {
+  for (let s = size; s >= min; s -= 2) {
+    font(ctx, weight, s, fam, style);
+    const lines = wrap(ctx, text, maxW);
+    if (lines.length <= maxLines) return { size: s, lines };
+  }
+  font(ctx, weight, min, fam, style);
+  let lines = wrap(ctx, text, maxW);
+  if (lines.length > maxLines) {
+    lines = lines.slice(0, maxLines);
+    let last = lines[maxLines - 1];
+    while (last && ctx.measureText(last + "…").width > maxW) last = last.replace(/\s*\S+$/, "");
+    lines[maxLines - 1] = last + "…";
+  }
+  return { size: min, lines };
+}
+/* the biggest size at which one line fits in maxW */
+function fitLine(ctx, text, maxW, size, min, weight, fam = "sans", style = "normal") {
+  for (let s = size; s > min; s -= 2) { font(ctx, weight, s, fam, style); if (ctx.measureText(text).width <= maxW) return s; }
+  font(ctx, weight, min, fam, style);
+  return min;
+}
+function rr(ctx, x, y, w, h, r) {
+  const k = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + k, y);
+  ctx.arcTo(x + w, y, x + w, y + h, k); ctx.arcTo(x + w, y + h, x, y + h, k);
+  ctx.arcTo(x, y + h, x, y, k); ctx.arcTo(x, y, x + w, y, k);
+  ctx.closePath();
+}
+/* a bar with rounded outer ends and square inner ends (for split bars) */
+function bar(ctx, x, y, w, h, rl, rr_) {
+  ctx.beginPath();
+  ctx.moveTo(x + rl, y); ctx.lineTo(x + w - rr_, y);
+  rr_ ? ctx.arcTo(x + w, y, x + w, y + rr_, rr_) : ctx.lineTo(x + w, y);
+  ctx.lineTo(x + w, y + h - rr_);
+  rr_ ? ctx.arcTo(x + w, y + h, x + w - rr_, y + h, rr_) : ctx.lineTo(x + w, y + h);
+  ctx.lineTo(x + rl, y + h);
+  rl ? ctx.arcTo(x, y + h, x, y + h - rl, rl) : ctx.lineTo(x, y + h);
+  ctx.lineTo(x, y + rl);
+  rl ? ctx.arcTo(x, y, x + rl, y, rl) : ctx.lineTo(x, y);
+  ctx.closePath();
+}
+function starPath(ctx, cx, cy, R, rot) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = rot - Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? R * 0.48 : R;
+    ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+  }
+  ctx.closePath();
+}
+function sparkle(ctx, x, y, r) {
+  ctx.beginPath();
+  ctx.moveTo(x, y - r);
+  ctx.quadraticCurveTo(x, y, x + r, y); ctx.quadraticCurveTo(x, y, x, y + r);
+  ctx.quadraticCurveTo(x, y, x - r, y); ctx.quadraticCurveTo(x, y, x, y - r);
+  ctx.fill();
+}
+function bg(ctx, color) { ctx.fillStyle = color; ctx.fillRect(0, 0, W, H); }
+function wordmark(ctx, color) {
+  font(ctx, 600, 30, "mono"); ctx.fillStyle = color; ctx.textAlign = "left"; ctx.fillText("/nice-to-claude", M, 104);
+}
+function footer(ctx, color, align = "left") {
+  font(ctx, 500, 26); ctx.fillStyle = color; ctx.textAlign = align;
+  ctx.fillText("Count yours: " + linkShort(), align === "center" ? W / 2 : M, H - 66);
+  ctx.textAlign = "left";
+}
+function pct(a, b) {
+  if (!b) return ["100%", "0%"];
+  if (!a) return ["0%", "100%"];
+  let pa = Math.round((100 * a) / (a + b)), pb = 100 - pa;
+  if (pa === 0) { pa = "<1"; pb = ">99"; } else if (pb === 0) { pb = "<1"; pa = ">99"; }
+  return [pa + "%", pb + "%"];
+}
+function seeded(i) { const x = Math.sin(i * 12.9898) * 43758.5453; return x - Math.floor(x); }
+
+/* ── words shared by cards, captions and the one-pager ──────────────────── */
+function headline() {
+  const p = DATA.please, t = DATA.thanks;
+  if (p && t) return `I've said please to Claude ${fmt(p)} ${times(p)} and thank you ${fmt(t)} ${times(t)}.`;
+  if (p) return `I've said please to Claude ${fmt(p)} ${times(p)}.`;
+  return `I've said thank you to Claude ${fmt(t)} ${times(t)}.`;
+}
+function streakInfo() {
+  const D = DATA;
+  if (D.current >= 2) return { n: D.current, now: true };
+  if (D.longest >= 2) return { n: D.longest, now: false };
+  return { n: D.chart.filter(c => c.on).length, now: null };
+}
+function famWord(fam) { return fam === "please" ? "please" : "thank you"; }
+
+/* ── card 1: summary ────────────────────────────────────────────────────── */
+function drawSummary(ctx, st) {
+  const D = DATA, inner = W - 2 * M;
+  bg(ctx, C.grape);
+  wordmark(ctx, C.onDarkMuted);
+
+  // headline: the sentence people would post
+  const hl = fitWrap(ctx, headline(), inner, 4, 84, 56, 800);
+  track(ctx, -1.5);
+  ctx.fillStyle = C.onDark;
+  let y = 168 + hl.size * 0.8;
+  const lh = Math.round(hl.size * 1.07);
+  hl.lines.forEach((line, i) => ctx.fillText(line, M, y + i * lh));
+  track(ctx, 0);
+  y += (hl.lines.length - 1) * lh + 62;
+
+  // please / thank-you split
+  const p = D.please, t = D.thanks, gap = 4, bh = 30;
+  let pw = p && t ? Math.round(((inner - gap) * p) / (p + t)) : p ? inner : 0;
+  if (p && t) pw = Math.min(Math.max(pw, 14), inner - gap - 14);
+  if (pw) { ctx.fillStyle = C.pleaseD; bar(ctx, M, y, pw, bh, 8, t ? 0 : 8); ctx.fill(); }
+  if (t) { const x = pw ? M + pw + gap : M; ctx.fillStyle = C.thanksD; bar(ctx, x, y, M + inner - x, bh, pw ? 0 : 8, 8); ctx.fill(); }
+  const [pp, tp] = pct(p, t);
+  y += bh + 48;
+  font(ctx, 600, 30); ctx.fillStyle = C.onDark;
+  if (p) { ctx.fillStyle = C.pleaseD; rr(ctx, M, y - 22, 22, 22, 5); ctx.fill(); ctx.fillStyle = C.onDark; ctx.fillText(`please ${pp}`, M + 34, y); }
+  if (t) {
+    ctx.fillStyle = C.thanksD; rr(ctx, W - M - 22, y - 22, 22, 22, 5); ctx.fill();
+    ctx.fillStyle = C.onDark; ctx.textAlign = "right"; ctx.fillText(`thank you ${tp}`, W - M - 34, y); ctx.textAlign = "left";
+  }
+
+  // contribution graph: every polite day for 26 weeks
+  y += 82;
+  font(ctx, 650, 30); ctx.fillStyle = C.onDark; ctx.fillText("Polite days, last six months", M, y);
+  const sq = 18, sg = 5;
+  font(ctx, 500, 22); ctx.fillStyle = C.onDarkMuted; ctx.textAlign = "right";
+  let lx = W - M - 5 * sq - 4 * sg;
+  ctx.fillText("more", W - M, y); const moreW = ctx.measureText("more").width + 10;
+  lx -= moreW;
+  ctx.fillText("less", lx - 10, y); ctx.textAlign = "left";
+  C.rampD.forEach((col, i) => { ctx.fillStyle = col; rr(ctx, lx + i * (sq + sg), y - sq + 2, sq, sq, 4); ctx.fill(); });
+  y += 44;
+  const G = D.graph26, cols = G.levels[0].length, cg = 6, cell = (inner - (cols - 1) * cg) / cols;
+  font(ctx, 500, 22); ctx.fillStyle = C.onDarkMuted;
+  G.months.forEach(([c, label]) => ctx.fillText(label, M + c * (cell + cg), y));
+  y += 16;
+  for (let r = 0; r < 7; r++) for (let c = 0; c < cols; c++) {
+    const lv = G.levels[r][c];
+    if (lv === null) continue;
+    ctx.fillStyle = C.rampD[lv]; rr(ctx, M + c * (cell + cg), y + r * (cell + cg), cell, cell, 6); ctx.fill();
+  }
+  y += 7 * cell + 6 * cg;
+
+  // three highlights
+  y += 84;
+  const colW = (inner - 48) / 3;
+  const fav = (D.fav || "none yet").replace(" (typo)", " typos");
+  const stats = [[`${fmt(D.longest)} ${days(D.longest)}`, "longest streak"], [fav, "favorite nice word"], [D.bestMonth.label, "best month"]];
+  stats.forEach(([v, label], i) => {
+    const x = M + i * (colW + 24);
+    fitLine(ctx, v, colW, 50, 30, 800); ctx.fillStyle = C.onDark; ctx.fillText(v, x, y);
+    font(ctx, 500, 26); ctx.fillStyle = C.onDarkMuted; ctx.fillText(label, x, y + 40);
+  });
+
+  // fun fact
+  y += 112;
+  const room = Math.max(1, Math.floor((H - 128 - y) / 46) + 1);
+  const ff = fitWrap(ctx, D.facts[st.fact] || "", inner, Math.min(3, room), 34, 26, 500, "sans", "italic");
+  ctx.fillStyle = C.onDarkSoft;
+  ff.lines.forEach((line, i) => ctx.fillText(line, M, y + i * Math.round(ff.size * 1.35)));
+
+  footer(ctx, C.onDarkMuted);
+}
+
+/* ── card 2: milestone sticker ──────────────────────────────────────────── */
+function stickerPath(ctx, R, bumps) {
+  const r0 = R * 0.93, rb = r0 * Math.sin(Math.PI / bumps) * 1.18;
+  ctx.beginPath();
+  ctx.moveTo(r0, 0); ctx.arc(0, 0, r0, 0, Math.PI * 2);
+  for (let i = 0; i < bumps; i++) {
+    const a = (i / bumps) * Math.PI * 2, x = Math.cos(a) * r0, y = Math.sin(a) * r0;
+    ctx.moveTo(x + rb, y); ctx.arc(x, y, rb, 0, Math.PI * 2);
+  }
+}
+function arcText(ctx, text, r, spacing) {
+  const chars = [...text], widths = chars.map(ch => ctx.measureText(ch).width + spacing);
+  const total = widths.reduce((a, b) => a + b, 0) - spacing;
+  let a = -total / r / 2;
+  ctx.textAlign = "center";
+  chars.forEach((ch, i) => {
+    const w = widths[i] - spacing;
+    ctx.save(); ctx.rotate(a + w / 2 / r); ctx.fillText(ch, 0, -r); ctx.restore();
+    a += widths[i] / r;
+  });
+  ctx.textAlign = "left";
+}
+function drawMilestone(ctx, st) {
+  const fam = st.fam, ms = DATA.milestones[fam], ink = C.fieldInk[fam], word = famWord(fam);
+  bg(ctx, C.field[fam]);
+  ctx.globalAlpha = 0.8; wordmark(ctx, ink); ctx.globalAlpha = 1;
+
+  // a few sparkles around the sticker
+  ctx.fillStyle = fam === "please" ? "rgba(255, 248, 238, 0.85)" : "rgba(255, 255, 255, 0.8)";
+  [[178, 292, 28], [912, 236, 36], [948, 842, 22], [140, 820, 32], [986, 560, 14], [104, 560, 12]].forEach(([x, y, r]) => sparkle(ctx, x, y, r));
+
+  // the good-manners sticker
+  const cx = W / 2, cy = 586, R = 330;
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(-0.07);
+  ctx.save();
+  ctx.shadowColor = "rgba(30, 8, 0, 0.30)"; ctx.shadowBlur = 36; ctx.shadowOffsetY = 16;
+  stickerPath(ctx, R, 28); ctx.fillStyle = C.sticker; ctx.fill("nonzero");
+  ctx.restore();
+  const tone = fam === "please" ? C.pleaseL : C.thanksL;
+  ctx.strokeStyle = tone; ctx.globalAlpha = 0.45; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(0, 0, R * 0.8, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+  font(ctx, 700, 30); ctx.fillStyle = tone; arcText(ctx, "good manners", R * 0.8 - 46, 4);
+  ctx.fillStyle = C.ink; ctx.textAlign = "center";
+  font(ctx, 800, 66); ctx.fillText(word, 0, -74);
+  const num = "#" + fmt(ms.n);
+  fitLine(ctx, num, R * 1.3, 200, 90, 900);
+  track(ctx, -4); ctx.fillText(num, 0, 104); track(ctx, 0);
+  ctx.fillStyle = tone;
+  [-1, 0, 1].forEach(i => { starPath(ctx, i * 52, 192, i ? 15 : 20, 0); ctx.fill(); });
+  ctx.restore();
+
+  // what it was and what's next
+  ctx.fillStyle = ink; ctx.textAlign = "center";
+  const when = ms.date === "today" ? "Reached today." : `Reached on ${ms.date}.`;
+  fitLine(ctx, when, W - 2 * M, 50, 34, 800); ctx.fillText(when, W / 2, 1036);
+  ctx.globalAlpha = 0.9; font(ctx, 500, 40, "sans", "italic"); ctx.fillText("Claude will remember this.", W / 2, 1098);
+  ctx.globalAlpha = 0.75; font(ctx, 500, 30);
+  ctx.fillText(`Next up: ${word} #${fmt(ms.next)}, ${fmt(ms.toGo)} to go.`, W / 2, 1166);
+  ctx.globalAlpha = 0.8; footer(ctx, ink, "center"); ctx.globalAlpha = 1;
+  ctx.textAlign = "left";
+}
+
+/* ── card 3: streak sticker chart ───────────────────────────────────────── */
+function goldStar(ctx, x, y, R, rot) {
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.shadowColor = "rgba(60, 30, 0, 0.22)"; ctx.shadowBlur = 8; ctx.shadowOffsetY = 3;
+  starPath(ctx, x, y, R, rot); ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = R * 0.42; ctx.stroke();
+  ctx.restore();
+  ctx.save(); ctx.lineJoin = "round";
+  starPath(ctx, x, y, R, rot); ctx.fillStyle = C.gold; ctx.fill();
+  ctx.strokeStyle = C.goldEdge; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.restore();
+}
+function drawStreak(ctx) {
+  const D = DATA, inner = W - 2 * M, si = streakInfo();
+  bg(ctx, C.lilac);
+  wordmark(ctx, C.inkMuted);
+
+  // the number and what it means
+  const num = fmt(si.n);
+  const ns = fitLine(ctx, num, inner, 300, 120, 900);
+  track(ctx, -8); ctx.fillStyle = C.ink; ctx.fillText(num, M - 6, 158 + ns * 0.74);
+  const numW = ctx.measureText(num).width; track(ctx, 0);
+  if (numW + 320 < inner) goldStar(ctx, W - M - 150, 158 + ns * 0.42, 118, 0.18);
+  let line;
+  if (si.now === true) line = `${days(si.n)} in a row of saying please or thank you to Claude.`;
+  else if (si.now === false) line = `${days(si.n)} in a row of being nice to Claude. My record, ${D.longestFrom} to ${D.longestTo}.`;
+  else line = `polite ${days(si.n)} with Claude in the last five weeks.`;
+  const tl = fitWrap(ctx, line, inner, 3, 54, 40, 750);
+  let y = 158 + ns * 0.74 + 84;
+  ctx.fillStyle = C.ink; track(ctx, -0.5);
+  tl.lines.forEach((l, i) => ctx.fillText(l, M, y + i * Math.round(tl.size * 1.12)));
+  track(ctx, 0);
+  y += (tl.lines.length - 1) * Math.round(tl.size * 1.12) + 74;
+
+  // which days belong to the streak that's running now
+  const chart = D.chart, inRun = new Set();
+  if (si.now) {
+    let i = chart.findIndex(c => c.today);
+    if (i >= 0 && !chart[i].on) i--;
+    while (i >= 0 && chart[i].on) inRun.add(i--);
+  }
+
+  // the sticker chart: five weeks, Sunday first
+  const gap = 12, cw = (inner - 6 * gap) / 7;
+  const keyY = H - 66 - 78;                       // baseline of the star key, above the footer
+  const ch = Math.min(104, (keyY - 56 - (y + 18) - 4 * gap) / 5);
+  font(ctx, 700, 24); ctx.fillStyle = C.inkMuted; ctx.textAlign = "center";
+  ["S", "M", "T", "W", "T", "F", "S"].forEach((d, i) => ctx.fillText(d, M + i * (cw + gap) + cw / 2, y));
+  ctx.textAlign = "left";
+  y += 18;
+  chart.forEach((c, i) => {
+    const col = i % 7, row = Math.floor(i / 7), x = M + col * (cw + gap), yy = y + row * (ch + gap);
+    rr(ctx, x, yy, cw, ch, 14);
+    if (c.future) { ctx.fillStyle = "rgba(255, 255, 255, 0.45)"; ctx.fill(); }
+    else {
+      ctx.fillStyle = inRun.has(i) ? C.streakTint : C.paper; ctx.fill();
+      ctx.lineWidth = c.today ? 4 : 2; ctx.strokeStyle = c.today ? C.ink : C.line; ctx.stroke();
+    }
+    font(ctx, 600, 21); ctx.fillStyle = c.future ? "rgba(101, 90, 124, 0.5)" : C.inkMuted;
+    ctx.fillText(c.d === 1 || i === 0 ? `${c.m} ${c.d}` : String(c.d), x + 13, yy + 28);
+    if (c.on) goldStar(ctx, x + cw * 0.6, yy + ch * 0.64, Math.min(28, ch * 0.26), (seeded(i + c.d) - 0.5) * 0.5);
+  });
+  y = keyY;
+  goldStar(ctx, M + 14, y - 10, 14, 0);
+  font(ctx, 500, 26); ctx.fillStyle = C.inkMuted;
+  ctx.fillText("a day I said please or thank you to Claude", M + 40, y);
+  footer(ctx, C.inkMuted);
+}
+
+/* ── card 4: receipt ────────────────────────────────────────────────────── */
+function receiptLines() {
+  const D = DATA, total = D.please + D.thanks;
+  const items = D.kinds.filter(k => !/typos$/.test(k[0])).map(k => [k[0].toUpperCase(), k[1]]);
+  if (items.length > 7) { const rest = items.splice(6); items.push(["OTHER NICETIES", rest.reduce((a, b) => a + b[1], 0)]); }
+  if (D.typos) items.push(["TYPOS (FORGIVEN)", D.typos]);
+  const L = [
+    { t: "center", s: "NICE TO CLAUDE", size: 44, w: 800 },
+    { t: "center", s: "MANNERS DEPARTMENT", size: 24 },
+    { t: "center", s: "OPEN 24/7 IN YOUR TERMINAL", size: 24 },
+    { t: "rule" },
+    { t: "row", l: `DATE ${D.date}`, r: `TIME ${D.time}` },
+    { t: "row", l: `ORDER #${String(total).padStart(6, "0")}`, r: "CASHIER: YOU" },
+    { t: "rule" },
+    ...items.map(([name, n]) => ({ t: "item", l: name, q: `x${fmt(n)}`, r: "0.00" })),
+    { t: "rule" },
+    { t: "row", l: "SUBTOTAL", r: `${fmt(total)} NICE WORDS` },
+  ];
+  if (D.skipped) L.push({ t: "item", l: "FALSE ALARMS", q: `x${fmt(D.skipped)}`, r: "VOID" });
+  L.push(
+    { t: "row", l: "TOKENS OF MANNERS", r: `~${fmt(total)}` },
+    { t: "rule", double: true },
+    { t: "row", l: "TOTAL DUE", r: "$0.00", size: 40, w: 800 },
+    { t: "center", s: "PAID IN FULL WITH KINDNESS", size: 24 },
+    { t: "rule" },
+    { t: "qr" },
+    { t: "center", s: "SCAN TO COUNT YOURS", size: 22 },
+    { t: "center", s: linkShort(), size: 19 },
+    { t: "space", h: 14 },
+    { t: "center", s: "THANK YOU FOR SAYING THANK YOU", size: 24, w: 700 },
+  );
+  return L;
+}
+function lineHeight(l, lh, qr) {
+  if (l.t === "rule") return 30;
+  if (l.t === "space") return l.h;
+  if (l.t === "qr") return qr + 26;
+  return Math.max(lh, Math.round((l.size || 27) * 1.45));
+}
+function drawReceipt(ctx) {
+  bg(ctx, C.receiptField);
+  // a little texture behind the paper: the plugin's please and thank-you squares
+  ctx.globalAlpha = 0.16;
+  for (let i = 0; i < 120; i++) {
+    const x = seeded(i) * W, y = seeded(i + 500) * H, s = 10 + seeded(i + 900) * 18;
+    ctx.fillStyle = i % 3 ? "#FFFFFF" : "#FF9550"; rr(ctx, x, y, s, s, 3); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  const L = receiptLines(), pw = 720, pad = 48, tooth = 14;
+  let lh = 40, qr = 176;
+  let content = L.reduce((a, l) => a + lineHeight(l, lh, qr), 0);
+  const maxH = H - 120 - 2 * pad - 2 * tooth;
+  if (content > maxH) { lh = 36; qr = 150; content = L.reduce((a, l) => a + lineHeight(l, lh, qr), 0); }
+  const ph = content + 2 * pad + 2 * tooth;
+
+  ctx.save();
+  ctx.translate(W / 2, H / 2); ctx.rotate(-0.025); ctx.translate(-pw / 2, -ph / 2);
+  // paper with torn, zig-zag ends
+  ctx.beginPath();
+  const n = Math.round(pw / (tooth * 2)), tw = pw / n;
+  ctx.moveTo(0, tooth);
+  for (let i = 0; i < n; i++) { ctx.lineTo(i * tw + tw / 2, 0); ctx.lineTo((i + 1) * tw, tooth); }
+  ctx.lineTo(pw, ph - tooth);
+  for (let i = n; i > 0; i--) { ctx.lineTo(i * tw - tw / 2, ph); ctx.lineTo((i - 1) * tw, ph - tooth); }
+  ctx.closePath();
+  ctx.save(); ctx.shadowColor = "rgba(18, 6, 40, 0.42)"; ctx.shadowBlur = 44; ctx.shadowOffsetY = 20;
+  ctx.fillStyle = "#FFFEFB"; ctx.fill(); ctx.restore();
+
+  const x0 = pad, x1 = pw - pad, xq = pad + (pw - 2 * pad) * 0.72;
+  let y = tooth + pad;
+  ctx.fillStyle = "#231B2E";
+  for (const l of L) {
+    const h = lineHeight(l, lh, qr), base = y + h * 0.72;
+    if (l.t === "rule") {
+      ctx.save(); ctx.strokeStyle = "#231B2E"; ctx.lineWidth = 2; ctx.setLineDash([8, 7]);
+      ctx.beginPath(); ctx.moveTo(x0, y + 15); ctx.lineTo(x1, y + 15); ctx.stroke();
+      if (l.double) { ctx.beginPath(); ctx.moveTo(x0, y + 22); ctx.lineTo(x1, y + 22); ctx.stroke(); }
+      ctx.restore();
+    } else if (l.t === "center") {
+      font(ctx, l.w || 500, l.size || 27, "mono"); ctx.textAlign = "center";
+      fitLine(ctx, l.s, x1 - x0, l.size || 27, 14, l.w || 500, "mono");
+      ctx.fillText(l.s, pw / 2, base); ctx.textAlign = "left";
+    } else if (l.t === "row") {
+      font(ctx, l.w || 500, l.size || 27, "mono");
+      ctx.fillText(l.l, x0, base); ctx.textAlign = "right"; ctx.fillText(l.r, x1, base); ctx.textAlign = "left";
+    } else if (l.t === "item") {
+      font(ctx, 500, 27, "mono");
+      ctx.fillText(l.l, x0, base); ctx.textAlign = "right"; ctx.fillText(l.q, xq, base); ctx.fillText(l.r, x1, base); ctx.textAlign = "left";
+    } else if (l.t === "qr") {
+      drawQR(ctx, pw / 2 - qr / 2, y + 8, qr, "#231B2E");
+    }
+    y += h;
+  }
+  ctx.restore();
+}
+function drawQR(ctx, x, y, size, color) {
+  const rows = DATA.qr, n = rows.length, s = size / n;
+  ctx.fillStyle = color;
+  rows.forEach((row, r) => [...row].forEach((ch, c) => { if (ch === "#") ctx.fillRect(x + c * s, y + r * s, s + 0.4, s + 0.4); }));
+}
+
+/* ── the page ───────────────────────────────────────────────────────────── */
+const state = { fact: 0, fam: "please" };
+const CARDS = [
+  { id: "summary", title: "Summary", desc: "Your totals, six months of polite days and a fun fact.", draw: drawSummary,
+    alt: () => `${headline()} Polite days over the last six months, longest streak, favorite nice word and best month.`,
+    caption: () => `${headline()} Counting them with nice-to-claude 🙏` },
+  { id: "milestone", title: "Milestone", desc: "Your latest milestone, as a good-manners sticker.", draw: drawMilestone,
+    alt: () => { const m = DATA.milestones[state.fam]; return `A good manners sticker for ${famWord(state.fam)} number ${fmt(m.n)}, reached ${m.date === "today" ? "today" : "on " + m.date}.`; },
+    caption: () => `Just hit ${famWord(state.fam)} #${fmt(DATA.milestones[state.fam].n)} with Claude. Claude will remember this 🫶` },
+  { id: "streak", title: "Streak", desc: "A gold star for every polite day in the last five weeks.", draw: drawStreak,
+    alt: () => { const s = streakInfo(); return s.now === null ? `${s.n} polite days with Claude in the last five weeks, shown as gold stars on a calendar.` : `${s.n} days in a row of being nice to Claude, shown as gold stars on a calendar.`; },
+    caption: () => { const s = streakInfo(); return s.now === true ? `${fmt(s.n)} days in a row of saying please or thank you to Claude 🔥` : s.now === false ? `My record: ${fmt(s.n)} days in a row of being nice to Claude 🔥` : `${fmt(s.n)} polite days with Claude in the last five weeks ⭐`; } },
+  { id: "receipt", title: "Receipt", desc: "Your manners, itemized, with a QR code to the plugin.", draw: drawReceipt,
+    alt: () => `A receipt itemizing ${fmt(DATA.please + DATA.thanks)} pleases and thank-yous, total due $0.00, with a QR code to the plugin.`,
+    caption: () => `The receipt for my manners with Claude: ${fmt(DATA.please + DATA.thanks)} nice words, $0.00 due 🧾` },
+];
+
+let toastTimer;
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("on");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), 2600);
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand("copy"); } catch { ok = false; }
+    ta.remove(); return ok;
+  }
+}
+const pngBlob = canvas => new Promise(res => canvas.toBlob(res, "image/png"));
+function fullCaption(card) { return `${card.caption()}\n${DATA.link}`; }
+function postUrl(site, card) {
+  const enc = encodeURIComponent;
+  if (site === "X") return `https://x.com/intent/tweet?text=${enc(card.caption())}&url=${enc(DATA.link)}`;
+  if (site === "Bluesky") return `https://bsky.app/intent/compose?text=${enc(fullCaption(card))}`;
+  if (site === "Threads") return `https://www.threads.net/intent/post?text=${enc(fullCaption(card))}`;
+  return `https://www.linkedin.com/sharing/share-offsite/?url=${enc(DATA.link)}`;
+}
+function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "on") for (const [ev, fn] of Object.entries(v)) n.addEventListener(ev, fn);
+    else if (k === "text") n.textContent = v;
+    else n.setAttribute(k, v);
+  }
+  kids.flat().forEach(k => k && n.append(k));
+  return n;
+}
+function render(card) {
+  const ctx = card.canvas.getContext("2d");
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
+  ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+  card.draw(ctx, state);
+  card.canvas.setAttribute("aria-label", card.alt());
+  card.captionEl.textContent = fullCaption(card);
+}
+function buildCards() {
+  const list = document.getElementById("cards");
+  const ms = DATA.milestones, fams = ["please", "thanks"].filter(f => ms[f]);
+  if (fams.length) state.fam = fams.length === 2 && ms.thanks.iso > ms.please.iso ? "thanks" : fams[0];
+  let canShareFiles = false;
+  try { canShareFiles = !!(navigator.canShare && navigator.canShare({ files: [new File([""], "x.png", { type: "image/png" })] })); } catch { canShareFiles = false; }
+  for (const card of CARDS) {
+    if (card.id === "milestone" && !fams.length) continue;
+    const canvas = el("canvas", { width: W, height: H, role: "img" });
+    const file = `nice-to-claude-${card.id}.png`;
+    const actions = el("div", { class: "row" },
+      el("button", { class: "primary", type: "button", text: "Download PNG", on: { click: async () => {
+        const blob = await pngBlob(canvas); const url = URL.createObjectURL(blob);
+        const a = el("a", { href: url, download: file }); document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000); toast(`Downloaded ${file}`);
+      } } }),
+      el("button", { type: "button", text: "Copy image", on: { click: async () => {
+        try { await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlob(canvas) })]); toast("Copied the card. Paste it into your post."); }
+        catch { toast("This browser can't copy images. Use Download PNG instead."); }
+      } } }),
+      canShareFiles ? el("button", { type: "button", text: "Share…", on: { click: async () => {
+        try { const f = new File([await pngBlob(canvas)], file, { type: "image/png" }); await navigator.share({ files: [f], text: fullCaption(card) }); }
+        catch (e) { if (e && e.name !== "AbortError") toast("Sharing didn't work here. Use Download PNG instead."); }
+      } } }) : null,
+      el("button", { class: "quiet", type: "button", text: "Copy caption", on: { click: async () => toast((await copyText(fullCaption(card))) ? "Copied the caption." : "Couldn't copy. Select the caption and copy it.") } }),
+    );
+    let variants = null;
+    if (card.id === "summary" && DATA.facts.length > 1) {
+      variants = el("div", { class: "row" }, el("button", { class: "quiet", type: "button", text: "Another fun fact", on: { click: () => {
+        state.fact = (state.fact + 1) % DATA.facts.length; render(card); fillFact();
+      } } }));
+    }
+    if (card.id === "milestone" && fams.length === 2) {
+      const btns = fams.map(f => el("button", { class: "quiet", type: "button", "aria-pressed": String(f === state.fam), text: famWord(f), on: { click: () => {
+        state.fam = f; btns.forEach(b => b.setAttribute("aria-pressed", String(b.textContent === famWord(f)))); render(card);
+      } } }));
+      variants = el("div", { class: "row seg", role: "group", "aria-label": "Milestone" }, btns);
+    }
+    const captionEl = el("p", { class: "caption" });
+    const post = el("p", { class: "post" }, "Post to",
+      ...["X", "Bluesky", "Threads", "LinkedIn"].map(site => el("a", { href: "#", text: site, on: { click: ev => {
+        ev.preventDefault();
+        window.open(postUrl(site, card), "_blank", "noopener");
+        copyText(fullCaption(card)).then(ok => ok && toast(site === "LinkedIn" ? "Copied the caption. Paste it into the LinkedIn post." : "Copied the caption too, in case you need it."));
+      } } })));
+    Object.assign(card, { canvas, captionEl });
+    list.append(el("li", { class: "card" }, el("h2", { text: card.title }), el("p", { class: "desc", text: card.desc }), canvas, variants, actions, captionEl, post));
+    render(card);
+  }
+}
+
+/* ── the one-page summary ───────────────────────────────────────────────── */
+const SVGNS = "http://www.w3.org/2000/svg";
+function svg(tag, attrs = {}, text) {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  if (text != null) n.textContent = text;
+  return n;
+}
+function svgRoundTop(x, y, w, h, r) {
+  const k = Math.min(r, w / 2, h);
+  return `M${x},${y + h}V${y + k}Q${x},${y} ${x + k},${y}H${x + w - k}Q${x + w},${y} ${x + w},${y + k}V${y + h}Z`;
+}
+function fillFact() { const f = document.getElementById("s-fact"); if (f) f.textContent = DATA.facts[state.fact] || ""; }
+function buildSheet() {
+  const D = DATA, S = document.getElementById("sheet"), p = D.please, t = D.thanks;
+  const [pp, tp] = pct(p, t);
+  S.append(
+    el("div", { class: "s-top" }, el("span", { class: "s-mark", text: "/nice-to-claude" }), el("span", { text: `As of ${D.asOf}` })),
+    el("h2", { text: "My manners with Claude" }),
+    el("p", { class: "s-lede", text: `Since ${D.since}, I've said please ${fmt(p)} ${times(p)} and thank you ${fmt(t)} ${times(t)}, on ${fmt(D.politeDays)} of the ${fmt(D.activeDays)} days I used Claude Code.` }),
+  );
+
+  // split bar, which doubles as the legend for the whole page
+  const split = el("section", { "aria-label": "Please and thank you split" });
+  const sb = svg("svg", { width: "186mm", height: "5mm", viewBox: "0 0 186 5", role: "img", "aria-label": `${pp} please, ${tp} thank you` });
+  const pw = p && t ? Math.min(Math.max((186 - 0.6) * p / (p + t), 2), 186 - 0.6 - 2) : p ? 186 : 0;
+  if (pw) sb.append(svg("rect", { x: 0, y: 0, width: pw, height: 5, rx: 1.2, fill: C.pleaseL }));
+  if (t) sb.append(svg("rect", { x: pw ? pw + 0.6 : 0, y: 0, width: 186 - (pw ? pw + 0.6 : 0), height: 5, rx: 1.2, fill: C.thanksL }));
+  split.append(sb, el("div", { class: "s-split-labels" },
+    el("span", {}, el("i", { class: "sw", style: `background:${C.pleaseL}` }), `please ${pp} (${fmt(p)})`),
+    el("span", {}, `thank you ${tp} (${fmt(t)})`, el("i", { class: "sw", style: `background:${C.thanksL}` }))));
+  S.append(split);
+
+  // contribution graph, 53 weeks
+  const G = D.graph53, cols = G.levels[0].length, pitch = 186 / cols, cell = pitch - 0.55;
+  const gs = svg("svg", { width: "186mm", height: `${4.2 + 7 * pitch}mm`, viewBox: `0 0 186 ${4.2 + 7 * pitch}`, role: "img", "aria-label": "Polite days over the last 12 months" });
+  G.months.forEach(([c, label]) => gs.append(svg("text", { x: c * pitch, y: 2.9, "font-size": 2.7, fill: "#6E6386" }, label)));
+  for (let r = 0; r < 7; r++) for (let c = 0; c < cols; c++) {
+    const lv = G.levels[r][c];
+    if (lv !== null) gs.append(svg("rect", { x: c * pitch, y: 4.2 + r * pitch, width: cell, height: cell, rx: 0.6, fill: C.rampL[lv] }));
+  }
+  const legend = el("span", { class: "s-legend" }, "less", ...C.rampL.map(col => el("i", { style: `background:${col}` })), "more");
+  S.append(el("section", {}, el("div", { class: "s-head" }, el("h3", { text: "Every polite day, last 12 months" }), legend), gs));
+
+  // month by month (stacked) + how I say it
+  const mw = 88, mh = 34, top = 4, base = mh - 5, slot = mw / D.months.length, bw = Math.min(5, slot * 0.62);
+  const maxM = Math.max(1, ...D.months.map(m => m.please + m.thanks));
+  const ms = svg("svg", { width: `${mw}mm`, height: `${mh}mm`, viewBox: `0 0 ${mw} ${mh}`, role: "img", "aria-label": "Nice words per month, please and thank you stacked" });
+  ms.append(svg("line", { x1: 0, x2: mw, y1: base + 0.15, y2: base + 0.15, stroke: "#E3DCF0", "stroke-width": 0.26 }));
+  D.months.forEach((m, i) => {
+    const x = i * slot + (slot - bw) / 2, total = m.please + m.thanks, scale = (base - top - 4) / maxM;
+    const hp = m.please * scale, ht = m.thanks * scale, gap = m.please && m.thanks ? 0.5 : 0;
+    if (m.please) ms.append(m.thanks ? svg("rect", { x, y: base - hp, width: bw, height: hp, fill: C.pleaseL }) : svg("path", { d: svgRoundTop(x, base - hp, bw, hp, 1), fill: C.pleaseL }));
+    if (m.thanks) ms.append(svg("path", { d: svgRoundTop(x, base - hp - gap - ht, bw, ht, 1), fill: C.thanksL }));
+    if (total) ms.append(svg("text", { x: x + bw / 2, y: base - hp - gap - ht - 1.2, "font-size": 2.4, "text-anchor": "middle", fill: "#1E1433" }, fmt(total)));
+    ms.append(svg("text", { x: x + bw / 2, y: base + 3.6, "font-size": 2.6, "text-anchor": "middle", fill: "#6E6386" }, m.label));
+  });
+  const monthSec = el("section", {}, el("h3", { text: "Month by month" }), ms);
+  const last = D.months[D.months.length - 1];
+  if (last && last.partial) monthSec.append(el("p", { class: "s-note", text: `${last.label} is month to date.` }));
+
+  const kinds = D.kinds.slice(0, 8), topK = Math.max(1, ...kinds.map(k => k[1]));
+  const kb = el("div", { class: "s-bars" });
+  kinds.forEach(([label, n, fam]) => kb.append(
+    el("span", { class: "l", text: label }),
+    el("span", { class: "s-track" }, el("b", { style: `width:${(100 * n) / topK}%;background:${fam === "please" ? C.pleaseL : C.thanksL}` })),
+    el("span", { class: "v", text: fmt(n) })));
+  S.append(el("div", { class: "s-cols" }, monthSec, el("section", {}, el("h3", { text: "How I say it" }), kb)));
+
+  // when + hall of fame
+  const topD = Math.max(1, ...D.dayparts.map(d => d[2]));
+  const db = el("div", { class: "s-bars" });
+  D.dayparts.forEach(([name, span, n]) => db.append(
+    el("span", { class: "l" }, name, el("small", { text: span })),
+    el("span", { class: "s-track" }, el("b", { style: `width:${(100 * n) / topD}%;background:#8A7DAE` })),
+    el("span", { class: "v", text: fmt(n) })));
+  const fame = [
+    ["Favorite nice word", (D.fav || "none yet").replace(" (typo)", " typos")],
+    ["Streak", D.current >= 2 ? `${fmt(D.current)} days now, best ${fmt(D.longest)}` : `best ${fmt(D.longest)} ${days(D.longest)}`],
+    ["Politest day", D.bestDay ? `${D.bestDay} (${fmt(D.bestDayN)})` : "none yet"],
+    ["Politest hour", D.bestHour],
+  ];
+  if (D.begs) fame.push(["Times I begged", fmt(D.begs)]);
+  if (D.skipped) fame.push(["False alarms ignored", fmt(D.skipped)]);
+  const dl = el("dl");
+  fame.forEach(([k, v]) => dl.append(el("dt", { text: k }), el("dd", { text: v })));
+  S.append(el("div", { class: "s-cols" },
+    el("section", {}, el("h3", { text: "When I'm politest" }), db),
+    el("section", {}, el("h3", { text: "Hall of fame" }), dl)));
+
+  S.append(el("section", {}, el("h3", { text: "Fun fact" }), el("p", { class: "s-fact", id: "s-fact" })));
+  fillFact();
+
+  // footer with a QR code to the plugin
+  const n = D.qr.length, qs = svg("svg", { width: "22mm", height: "22mm", viewBox: `-2 -2 ${n + 4} ${n + 4}`, role: "img", "aria-label": `QR code for ${linkShort()}` });
+  qs.append(svg("rect", { x: -2, y: -2, width: n + 4, height: n + 4, fill: "#fff" }));
+  let d = "";
+  D.qr.forEach((row, r) => [...row].forEach((ch, c) => { if (ch === "#") d += `M${c},${r}h1v1h-1z`; }));
+  qs.append(svg("path", { d, fill: "#1E1433", "shape-rendering": "crispEdges" }));
+  S.append(el("footer", {}, qs, el("div", {},
+    el("strong", { text: "Count your own pleases and thank-yous" }),
+    el("span", { text: `nice-to-claude is a free plugin for Claude Code. Scan the code or visit ${linkShort()}` }))));
+}
+
+/* ── start ──────────────────────────────────────────────────────────────── */
+function start() {
+  if (!DATA) {
+    document.getElementById("main").replaceChildren(el("p", { class: "empty", text: "This is the template for the share page. Run /nice-to-claude share in Claude Code to make your cards." }));
+    document.getElementById("hint").remove();
+    return;
+  }
+  state.fact = DATA.fact || 0;
+  const fl = document.getElementById("foot-link"); fl.href = DATA.link; fl.textContent = "nice-to-claude";
+  buildCards();
+  buildSheet();
+  document.getElementById("print-btn").addEventListener("click", () => window.print());
+  // safety net for unusual fonts: if the summary ever runs taller than a Letter page, shrink it to fit
+  const sheet = document.getElementById("sheet"), maxPx = (255 * 96) / 25.4;
+  window.addEventListener("beforeprint", () => { const h = sheet.offsetHeight; if (h > maxPx) sheet.style.zoom = (maxPx / h).toFixed(3); });
+  window.addEventListener("afterprint", () => { sheet.style.zoom = ""; });
+  document.documentElement.dataset.ready = "1";
+}
+(document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(start);
+</script>
+</body>
+</html>

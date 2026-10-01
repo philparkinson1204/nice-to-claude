@@ -1,26 +1,18 @@
 # Changelog
 
-## 1.7.0
+## 1.1.0
 
-- Month by month bars are split: 🟧 for pleases, then 🟪 for that month's share of thank-yous, with the thank-you percent after each count.
-- 20 new fun facts, from `pls` on 2x speed to strictly-work-friends weekends. Each one only shows when your numbers back it up.
-
-## 1.6.0
-
-- `/nice-to-claude` swaps the 26-week heatmap for one bar per month, with the count at the end and your best month marked.
-- The please/thanks bar is labeled: `🟧 87% please · 🟪 13% thanks`.
-
-## 1.5.0
-
-- Renamed everything to nice-to-claude: the plugin, the marketplace, the `/nice-to-claude` command, the `nice-to-claude` script and the `~/.cache/nice-to-claude` cache.
-
-## 1.4.0
-
-- `/nice-to-claude` is now a colored markdown dashboard: an emoji heatmap, a please-vs-thanks bar, all-time / 30-day / 7-day side by side, and bar charts of how and when you're polite.
-- The statusline shows this chat's pleases and thank-yous next to the all-time totals, plus a streak of polite messages in a row.
-- 🫶 now means pleases and 🙏 means thank-yous.
-- A message you stop and resend counts once. Pasted counter text (`▲ +3 please`) and naming the word (`an arrow for thanks`) don't count.
+- `/nice-to-claude share`: four share cards (Summary, Milestone, Streak and Receipt) to download as PNGs or copy, with captions and post links for X, Bluesky, Threads and LinkedIn, plus a one-page summary to print or save as a PDF. Everything is drawn in your browser from a local file, with nothing loaded from the internet.
+- Milestone messages now point to `/nice-to-claude share`.
+- Fun facts read right with very small numbers ("your one nice word", "~1 token").
 
 ## 1.0.0
 
-- First version: dashboard, statusline counter, milestone messages and audit.
+First release.
+
+- `/nice-to-claude`: a dashboard with your please/thanks split, a bar for each month, all-time / 30-day / 7-day stats, charts of how and when you're polite, a hall of fame and a random fun fact.
+- `/nice-to-claude audit`: every recent match, and why it did or didn't count.
+- Statusline counter: all-time totals, this chat's count, a 7-day sparkline, your daily streak and polite messages in a row.
+- Milestone messages at please #100, #500, #1,000 and so on.
+- Context-aware counting: quotes, code, UI copy, drafted or pasted messages, talking about the word and resends don't count. Typos like `pelase` do.
+- Private by design: runs locally, makes no network requests, and the cache holds counts only.
