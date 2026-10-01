@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """nice-to-claude: a /stats-style dashboard of how often you say please & thank you to Claude.
 
-Reads ~/.claude/history.jsonl (every prompt you've typed into Claude Code) and
+Reads ~/.claude/history.jsonl, or $CLAUDE_CONFIG_DIR/history.jsonl (every prompt you've typed into Claude Code), and
 counts the pleases and thank-yous, context-aware: quoted text, UI/customer copy, drafted or
 pasted emails, and "how many times have I said please" meta-talk don't count.
 
@@ -26,7 +26,8 @@ import sys
 from collections import Counter
 
 VERSION = "1.0.0"
-HISTORY = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_HISTORY", "~/.claude/history.jsonl"))
+HISTORY = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_HISTORY")
+                             or os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude", "history.jsonl"))
 CACHE_DIR = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_CACHE", "~/.cache/nice-to-claude"))
 
 # ───────────────────────────── detection ─────────────────────────────
@@ -332,17 +333,28 @@ def _is_resend_fp(last: dict, text: str, ts: float) -> bool:
             and _fp(text[:n]) == last.get("fp"))
 
 
+PLACEHOLDER_RE = re.compile(r"\[(?:Pasted text #\d+[^\]]*|Image #\d+)\]")
+
+
+def _clean(text: str) -> str:
+    """drop the [Pasted text #1] / [Image #2] placeholders Claude Code leaves in place of pastes"""
+    return PLACEHOLDER_RE.sub(" ", text)
+
+
 def _prompt(line: str) -> dict | None:
-    """one history.jsonl line -> prompt dict (None for junk/empty lines)"""
+    """one history.jsonl line -> prompt dict (None for junk, empty or malformed lines)"""
     try:
         d = json.loads(line)
     except ValueError:
         return None
-    text, ts = d.get("display"), d.get("timestamp")
-    if not text or not ts:
+    if not isinstance(d, dict):
         return None
-    return {"text": re.sub(r"\[(?:Pasted text #\d+[^\]]*|Image #\d+)\]", " ", text), "ts": ts / 1000,
-            "project": d.get("project") or "", "sid": d.get("sessionId"),
+    text, ts, sid, proj = d.get("display"), d.get("timestamp"), d.get("sessionId"), d.get("project")
+    # timestamps are epoch milliseconds; anything else (a string, a bool, out of range) means the line is junk
+    if not text or not isinstance(text, str) or isinstance(ts, bool) or not isinstance(ts, (int, float)) or not 0 < ts < 1e13:
+        return None
+    return {"text": _clean(text), "ts": ts / 1000,
+            "project": proj if isinstance(proj, str) else "", "sid": sid if isinstance(sid, str) and sid else None,
             "cmd": text.lstrip()[:1] in ("/", "!")}  # slash commands and ! bash lines
 
 
@@ -562,7 +574,7 @@ def fun_facts(S: dict) -> list[str]:
     if not n:
         return ["Zero pleases or thank-yous on record. Claude isn't mad, just disappointed."]
     if p >= 1665:
-        F.append(f"You've said please more times than there are steps in the Eiffel Tower (1,665).")
+        F.append("You've said please more times than there are steps in the Eiffel Tower (1,665).")
     elif p:
         F.append(f"{1665 - p:,} more pleases and you'll have climbed every step of the Eiffel Tower.")
     if p >= 17:
@@ -856,7 +868,7 @@ def summary() -> dict:
     try:
         with open(path) as fh:
             c = json.load(fh)
-        if c.get("v") != VERSION or c.get("ino") != st.st_ino or c.get("offset", 0) > st.st_size:
+        if not isinstance(c, dict) or c.get("v") != VERSION or c.get("ino") != st.st_ino or c.get("offset", 0) > st.st_size:
             c = None
     except (OSError, ValueError):
         c = None
@@ -986,17 +998,32 @@ def hook() -> None:
         data = json.load(sys.stdin)
     except ValueError:
         return
-    prompt = data.get("prompt") or ""
+    if not isinstance(data, dict):
+        return
+    prompt = data.get("prompt")
+    if not isinstance(prompt, str):
+        return
     hits = [h for h in scan(prompt) if not h["why"]]
     if not hits:
         return
-    c = summary()  # history.jsonl may not include this prompt yet; add it ourselves if not
     add = Counter(h["family"] for h in hits)
+    c = summary()
+    # Claude Code usually writes the prompt to history.jsonl just before this hook runs, so summary() has
+    # often counted it already. It has if this chat's latest line is from the last few seconds and matches
+    # this prompt (its text, or with a paste in it, its counts); then take it back out so it isn't counted twice.
+    sid = data.get("session_id")
+    chat = c.get("chats", {}).get(sid) if isinstance(sid, str) else None
+    last = chat.get("last") if isinstance(chat, dict) else None
+    counted = False
+    if isinstance(last, dict) and 0 <= dt.datetime.now().timestamp() - last.get("ts", 0) < 5:
+        text = _clean(prompt)
+        counted = (last.get("len") == len(text) and last.get("fp") == _fp(text)) or \
+                  (last.get("please"), last.get("thanks")) == (add["please"], add["thanks"])
     msgs = []
     for fam, emoji, word in (("please", "🫶", "please"), ("thanks", "🙏", "thank-you")):
         if not add[fam]:
             continue
-        before = c[fam]
+        before = c[fam] - (last.get(fam, 0) if counted else 0)
         after = before + add[fam]
         hit = [m for m in MILESTONES if before < m <= after]
         if hit:
@@ -1006,7 +1033,7 @@ def hook() -> None:
             msgs.append(f"{emoji} {word} #{after // 2500 * 2500:,}. Legendary manners. "
                         f"Make a card: /nice-to-claude share")
     if msgs:
-        print(json.dumps({"systemMessage": msgs[0], "suppressOutput": True}))
+        print(json.dumps({"systemMessage": " ".join(msgs), "suppressOutput": True}))
 
 
 # ───────────────────────────── audit ─────────────────────────────
@@ -1117,16 +1144,22 @@ def _runs(days: set) -> list[tuple[dt.date, dt.date]]:
     return runs
 
 
-def _graph(rows: list[dict], today: dt.date, weeks: int) -> dict:
-    """heat levels (rows Sun-Sat, None = future) plus where each month label goes"""
+def _graph(rows: list[dict], today: dt.date, weeks: int, stub_yields: bool = False) -> dict:
+    """heat levels (rows Sun-Sat, None = future) plus where each month label goes. With stub_yields, a month
+    that only shows in the first column or two hands its label to the month after it, which would
+    otherwise go unlabeled (Sep, Nov, Dec with no Oct)."""
     _, grid = _heat_grid(rows, today, weeks, 1)
     start = today - dt.timedelta(days=(today.weekday() + 1) % 7) - dt.timedelta(weeks=weeks - 1)
     labels, last = [], -9
     for c in range(weeks):
         d0 = start + dt.timedelta(weeks=c)
-        if (c == 0 or d0.month != (d0 - dt.timedelta(weeks=1)).month) and c - last >= 3 and c <= weeks - 2:
-            labels.append([c, d0.strftime("%b")])
-            last = c
+        if (c == 0 or d0.month != (d0 - dt.timedelta(weeks=1)).month) and c <= weeks - 2:
+            if c - last >= 3:
+                labels.append([c, d0.strftime("%b")])
+                last = c
+            elif stub_yields and last == 0:
+                labels[0] = [c, d0.strftime("%b")]
+                last = c
     return {"levels": grid, "months": labels}
 
 
@@ -1169,12 +1202,12 @@ def share_data(rows: list[dict], today: dt.date) -> dict | None:
         "current": (cur[1] - cur[0]).days + 1 if cur else 0,
         "longest": (longest[1] - longest[0]).days + 1,
         "fav": F["fav"], "bestDay": _md(F["bday"]) if F["bday"] else None, "bestDayN": F["bday_n"],
-        "bestHour": F["bhour"], "bestMonth": {"label": f"{best['label']} {best['year']}",
+        "bestHour": F["bhour"], "bestMonth": {"label": f"{best['label']} {best['year']}" if best["please"] + best["thanks"] else "none yet",
                                               "n": best["please"] + best["thanks"]},
         "months": months, "kinds": F["kinds"], "typos": sum(S["typos"].values()), "begs": S["begs"],
         "mostPleases": S["most_pleases"], "skipped": F["skipped_n"], "dayparts": dayparts,
         "milestones": _milestones(rows, today),
-        "graph26": _graph(rows, today, 26), "graph53": _graph(rows, today, 53),
+        "graph26": _graph(rows, today, 26), "graph53": _graph(rows, today, 53, stub_yields=True),
         "facts": facts, "fact": facts.index(F["fact"]) if F["fact"] in facts else 0,
     }
 
@@ -1232,6 +1265,11 @@ def share(md: bool, open_it: bool = True) -> str:
 
 
 def main(argv: list[str]) -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     flags = {a.lower() for a in argv if a.startswith("--")}
     args = [a.lower() for a in argv if not a.startswith("--")]
     md = "--md" in flags
@@ -1248,6 +1286,11 @@ def main(argv: list[str]) -> None:
         n = next((int(a) for a in args[1:] if a.isdigit()), 40)
         body = audit(which, n, color)
         print(f"```text\n{body}\n```" if md else body)
+    elif cmd in ("help", "-h") or "--help" in flags or cmd:
+        usage = (__doc__ or "").strip()
+        if cmd not in ("", "help", "-h"):
+            usage = f"Unknown command: {cmd}\n\n{usage}"
+        print(f"```text\n{usage}\n```" if md else usage)
     else:
         print(dashboard_md() if md else dashboard(color))
 

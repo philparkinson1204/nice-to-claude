@@ -53,8 +53,12 @@
   .print-intro { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px 32px; margin-bottom: 28px; }
   .print-intro h2 { font-size: 30px; letter-spacing: -0.02em; line-height: 1.1; margin: 0 0 6px; }
   .print-intro p { color: var(--muted); margin: 0; }
+  .print-intro .row { margin-top: 0; gap: 12px; }
+  .paper-size { display: inline-flex; gap: 2px; padding: 3px; border: 1.5px solid var(--line); border-radius: 999px; }
+  .paper-size button { border: 0; padding: 8px 14px; font-size: 14px; }
+  .paper-size button:hover { box-shadow: none; background: var(--line); }
+  .paper-size button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
   .paper-wrap { overflow-x: auto; padding: 4px 4px 24px; }
-  .paper { background: #fff; width: max-content; margin: 0 auto; padding: 12mm; box-shadow: 0 1px 0 rgba(30, 20, 51, 0.06), 0 24px 48px -28px rgba(20, 8, 40, 0.5); }
 
   .foot { margin-top: 56px; color: var(--muted); font-size: 14px; }
   .foot a { color: inherit; }
@@ -66,22 +70,41 @@
   #toast.on { opacity: 1; transform: translate(-50%, 0); }
   @media (prefers-reduced-motion: reduce) { #toast { transition: none; } }
 
-  /* ── the one-page summary: sized to fit Letter and A4 inside 12 mm margins ── */
-  #sheet { width: 186mm; color: #1E1433; background: #fff; font: 9.5pt/1.35 var(--sans); font-variant-numeric: tabular-nums; }
+  /* ── the one-page summary: a whole Letter or A4 page with its own 0.5 in margins, so the print
+        window's margin setting can't move it. On screen it's drawn at the paper's real size. ── */
+  #sheet { --pw: 215.9mm; --ph: 279.4mm; width: var(--pw); height: var(--ph); margin: 0 auto; padding: 12.7mm; overflow: hidden;
+           color: #1E1433; background: #fff; font: 9.5pt/1.35 var(--sans); font-variant-numeric: tabular-nums;
+           box-shadow: 0 1px 0 rgba(30, 20, 51, 0.06), 0 24px 48px -28px rgba(20, 8, 40, 0.5); }
+  #sheet[data-paper="a4"] { --pw: 210mm; --ph: 297mm; }
+  /* the blocks spread out to fill the page, header at the top and footer at the bottom. --fit is the
+     safety net: if the content ever runs taller than the page, fitSheet() shrinks it to fit. */
+  #sheet .s-in { --fit: 1; display: flex; flex-direction: column; justify-content: space-between; gap: 5mm;
+                 width: calc(100% / var(--fit)); height: calc(100% / var(--fit)); transform: scale(var(--fit)); transform-origin: 0 0; }
+  #sheet .s-in > * { flex: none; }
+  #sheet .s-wide { display: block; width: 100%; height: auto; }
   #sheet .s-top { display: flex; justify-content: space-between; color: #6E6386; font-size: 8.5pt; }
   #sheet .s-top .s-mark { font-family: var(--mono); }
   #sheet h2 { font-size: 27pt; line-height: 1; letter-spacing: -0.025em; font-weight: 800; margin: 4mm 0 2mm; }
   #sheet .s-lede { font-size: 12pt; line-height: 1.35; margin: 0; max-width: 160mm; }
   #sheet h3 { font-size: 10.5pt; font-weight: 700; margin: 0 0 2mm; letter-spacing: -0.005em; }
-  #sheet section { margin-top: 5mm; }
   #sheet .s-head { display: flex; justify-content: space-between; align-items: baseline; }
   #sheet .s-legend { font-size: 7.5pt; color: #6E6386; display: flex; align-items: center; gap: 1mm; }
   #sheet .s-legend i { display: inline-block; width: 2.6mm; height: 2.6mm; border-radius: .5mm; }
   #sheet .s-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10mm; }
+  /* month by month: the bars grow to match the column beside them */
+  #sheet .s-months { display: flex; flex-direction: column; }
+  #sheet .s-mchart { flex: 1 1 auto; min-height: 30mm; display: flex; border-bottom: .26mm solid #E3DCF0; }
+  #sheet .s-mcol { flex: 1; position: relative; }
+  #sheet .s-mcol b, #sheet .s-mcol span { position: absolute; left: 50%; transform: translateX(-50%); }
+  #sheet .s-mcol b { width: min(5mm, 62%); }
+  #sheet .s-mcol b.top { border-radius: 1mm 1mm 0 0; }
+  #sheet .s-mcol span { font-size: 7pt; line-height: 1; white-space: nowrap; }
+  #sheet .s-mlabels { display: flex; margin-top: 1mm; color: #6E6386; font-size: 7.5pt; line-height: 1.2; }
+  #sheet .s-mlabels span { flex: 1; text-align: center; }
   #sheet .s-split-labels { display: flex; justify-content: space-between; margin-top: 1.6mm; font-size: 9.5pt; }
   #sheet .s-split-labels span { display: inline-flex; align-items: center; gap: 1.6mm; }
   #sheet .sw { display: inline-block; width: 3mm; height: 3mm; border-radius: .6mm; }
-  #sheet .s-bars { display: grid; grid-template-columns: 27mm 1fr 11mm; align-items: center; row-gap: 1.3mm; column-gap: 2mm; }
+  #sheet .s-bars { display: grid; grid-template-columns: 27mm 1fr minmax(11mm, max-content); align-items: center; row-gap: 1.3mm; column-gap: 2mm; }
   #sheet .s-bars .l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #sheet .s-bars .l small { color: #6E6386; font-size: 7.5pt; margin-left: 1mm; }
   #sheet .s-bars .v { text-align: right; }
@@ -92,22 +115,25 @@
   #sheet dd { margin: 0; font-weight: 650; }
   #sheet .s-note { font-size: 7.5pt; color: #6E6386; margin: 1mm 0 0; }
   #sheet .s-fact { font-size: 12pt; line-height: 1.4; font-style: italic; margin: 0; max-width: 165mm; }
-  #sheet footer { display: flex; align-items: center; gap: 5mm; margin-top: 5mm; padding-top: 4mm; border-top: .3mm solid #E3DCF0; }
+  #sheet footer { display: flex; align-items: center; gap: 5mm; padding-top: 4mm; border-top: .3mm solid #E3DCF0; }
+  #sheet footer svg { flex: none; }
   #sheet footer strong { display: block; font-size: 11pt; }
   #sheet footer span { color: #4A4060; }
 
-  @page { margin: 12mm; }
+  /* no page margins: the sheet brings its own. The paper size is set with the Letter / A4 buttons (see setPaper). */
+  @page { margin: 0; }
   @media print {
     html, body { background: #fff !important; }
     .wrap { max-width: none; padding: 0; }
     .wrap > *:not(main), main > *:not(.print-block), .print-intro, #toast { display: none !important; }
     .print-block { display: block; margin: 0; }
     .paper-wrap { overflow: visible; padding: 0; }
-    .paper { padding: 0; box-shadow: none; width: auto; }
-    #sheet { break-inside: avoid; }
+    /* fill the printable area exactly, even if the print window adds margins of its own */
+    #sheet { width: 100%; height: 100vh; margin: 0; box-shadow: none; break-inside: avoid; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
+<style id="page-size">@page { size: letter; }</style>
 </head>
 <body>
 <div class="wrap">
@@ -123,11 +149,17 @@
       <div class="print-intro">
         <div>
           <h2 id="print-title">One-page summary</h2>
-          <p>Fits on Letter or A4. To keep a PDF, choose Save as PDF in the print window.</p>
+          <p>Pick Letter or A4, then print. To keep a PDF, choose Save as PDF in the print window.</p>
         </div>
-        <button class="primary" id="print-btn" type="button">Print or save as PDF</button>
+        <div class="row">
+          <div class="paper-size" role="group" aria-label="Paper size">
+            <button type="button" data-paper="letter" aria-pressed="false">Letter</button>
+            <button type="button" data-paper="a4" aria-pressed="false">A4</button>
+          </div>
+          <button class="primary" id="print-btn" type="button">Print or save as PDF</button>
+        </div>
       </div>
-      <div class="paper-wrap"><div class="paper"><article id="sheet" aria-label="One-page summary"></article></div></div>
+      <div class="paper-wrap"><article id="sheet" aria-label="One-page summary"></article></div>
     </section>
   </main>
   <p class="foot">Made with <a id="foot-link" href="#">nice-to-claude</a>, a free Claude Code plugin.</p>
@@ -264,15 +296,29 @@ function drawSummary(ctx, st) {
   bg(ctx, C.grape);
   wordmark(ctx, C.onDarkMuted);
 
-  // headline: the sentence people would post
+  // measure before drawing: the headline, the heatmap and the whole fun fact. Big totals make the headline
+  // four lines, so when that and a long fact would crowd the footer, the gaps between the blocks give up
+  // some room (up to GIVE px each) and the fact keeps its punchline.
   const hl = fitWrap(ctx, headline(), inner, 4, 84, 56, 800);
+  const lh = Math.round(hl.size * 1.07);
+  const G = D.graph26, cols = G.levels[0].length, cg = 6, cell = (inner - (cols - 1) * cg) / cols;
+  const fact = D.facts[st.fact] || "", whole = f => f.lines.join(" ") === fact.split(/\s+/).filter(Boolean).join(" ");
+  let ff = fitWrap(ctx, fact, inner, 2, 34, 28, 500, "sans", "italic");
+  if (!whole(ff)) ff = fitWrap(ctx, fact, inner, 3, 34, 26, 500, "sans", "italic");
+  const GAP = [62, 82, 84, 112], GIVE = [28, 26, 24, 20], sum = a => a.reduce((s, n) => s + n, 0);
+  const natural = 168 + hl.size * 0.8 + (hl.lines.length - 1) * lh + 30 + 48 + 44 + 16 + 7 * cell + 6 * cg
+                + sum(GAP) + (ff.lines.length - 1) * Math.round(ff.size * 1.35);
+  const squeeze = Math.min(1, Math.max(0, natural - (H - 128)) / sum(GIVE));
+  const space = i => GAP[i] - GIVE[i] * squeeze;
+
+  // headline: the sentence people would post
+  font(ctx, 800, hl.size);
   track(ctx, -1.5);
   ctx.fillStyle = C.onDark;
   let y = 168 + hl.size * 0.8;
-  const lh = Math.round(hl.size * 1.07);
   hl.lines.forEach((line, i) => ctx.fillText(line, M, y + i * lh));
   track(ctx, 0);
-  y += (hl.lines.length - 1) * lh + 62;
+  y += (hl.lines.length - 1) * lh + space(0);
 
   // please / thank-you split
   const p = D.please, t = D.thanks, gap = 4, bh = 30;
@@ -290,7 +336,7 @@ function drawSummary(ctx, st) {
   }
 
   // contribution graph: every polite day for 26 weeks
-  y += 82;
+  y += space(1);
   font(ctx, 650, 30); ctx.fillStyle = C.onDark; ctx.fillText("Polite days, last six months", M, y);
   const sq = 18, sg = 5;
   font(ctx, 500, 22); ctx.fillStyle = C.onDarkMuted; ctx.textAlign = "right";
@@ -300,7 +346,6 @@ function drawSummary(ctx, st) {
   ctx.fillText("less", lx - 10, y); ctx.textAlign = "left";
   C.rampD.forEach((col, i) => { ctx.fillStyle = col; rr(ctx, lx + i * (sq + sg), y - sq + 2, sq, sq, 4); ctx.fill(); });
   y += 44;
-  const G = D.graph26, cols = G.levels[0].length, cg = 6, cell = (inner - (cols - 1) * cg) / cols;
   font(ctx, 500, 22); ctx.fillStyle = C.onDarkMuted;
   G.months.forEach(([c, label]) => ctx.fillText(label, M + c * (cell + cg), y));
   y += 16;
@@ -312,7 +357,7 @@ function drawSummary(ctx, st) {
   y += 7 * cell + 6 * cg;
 
   // three highlights
-  y += 84;
+  y += space(2);
   const colW = (inner - 48) / 3;
   const fav = (D.fav || "none yet").replace(" (typo)", " typos");
   const stats = [[`${fmt(D.longest)} ${days(D.longest)}`, "longest streak"], [fav, "favorite nice word"], [D.bestMonth.label, "best month"]];
@@ -322,10 +367,11 @@ function drawSummary(ctx, st) {
     font(ctx, 500, 26); ctx.fillStyle = C.onDarkMuted; ctx.fillText(label, x, y + 40);
   });
 
-  // fun fact
-  y += 112;
-  const room = Math.max(1, Math.floor((H - 128 - y) / 46) + 1);
-  const ff = fitWrap(ctx, D.facts[st.fact] || "", inner, Math.min(3, room), 34, 26, 500, "sans", "italic");
+  // fun fact, whole. Only if even the tightest gaps can't make room does it get cut short with "…".
+  y += space(3);
+  const room = Math.floor((H - 128 - y) / Math.round(ff.size * 1.35)) + 1;
+  if (ff.lines.length > room) ff = fitWrap(ctx, fact, inner, Math.max(1, Math.min(3, room)), 34, 26, 500, "sans", "italic");
+  font(ctx, 500, ff.size, "sans", "italic");
   ctx.fillStyle = C.onDarkSoft;
   ff.lines.forEach((line, i) => ctx.fillText(line, M, y + i * Math.round(ff.size * 1.35)));
 
@@ -612,23 +658,21 @@ function svg(tag, attrs = {}, text) {
   if (text != null) n.textContent = text;
   return n;
 }
-function svgRoundTop(x, y, w, h, r) {
-  const k = Math.min(r, w / 2, h);
-  return `M${x},${y + h}V${y + k}Q${x},${y} ${x + k},${y}H${x + w - k}Q${x + w},${y} ${x + w},${y + k}V${y + h}Z`;
-}
-function fillFact() { const f = document.getElementById("s-fact"); if (f) f.textContent = DATA.facts[state.fact] || ""; }
+function fillFact() { const f = document.getElementById("s-fact"); if (f) { f.textContent = DATA.facts[state.fact] || ""; fitSheet(); } }
 function buildSheet() {
-  const D = DATA, S = document.getElementById("sheet"), p = D.please, t = D.thanks;
+  const D = DATA, p = D.please, t = D.thanks;
   const [pp, tp] = pct(p, t);
-  S.append(
+  const S = el("div", { class: "s-in" });  // everything on the page; #sheet around it is the paper and its margins
+  S.append(el("header", {},
     el("div", { class: "s-top" }, el("span", { class: "s-mark", text: "/nice-to-claude" }), el("span", { text: `As of ${D.asOf}` })),
     el("h2", { text: "My manners with Claude" }),
     el("p", { class: "s-lede", text: `Since ${D.since}, I've said please ${fmt(p)} ${times(p)} and thank you ${fmt(t)} ${times(t)}, on ${fmt(D.politeDays)} of the ${fmt(D.activeDays)} days I used Claude Code.` }),
-  );
+  ));
 
-  // split bar, which doubles as the legend for the whole page
+  // split bar, which doubles as the legend for the whole page. The charts are drawn 186 units wide and
+  // stretch to the page's text width (190.5 mm on Letter, 184.6 mm on A4), so they stay in proportion.
   const split = el("section", { "aria-label": "Please and thank you split" });
-  const sb = svg("svg", { width: "186mm", height: "5mm", viewBox: "0 0 186 5", role: "img", "aria-label": `${pp} please, ${tp} thank you` });
+  const sb = svg("svg", { class: "s-wide", viewBox: "0 0 186 5", role: "img", "aria-label": `${pp} please, ${tp} thank you` });
   const pw = p && t ? Math.min(Math.max((186 - 0.6) * p / (p + t), 2), 186 - 0.6 - 2) : p ? 186 : 0;
   if (pw) sb.append(svg("rect", { x: 0, y: 0, width: pw, height: 5, rx: 1.2, fill: C.pleaseL }));
   if (t) sb.append(svg("rect", { x: pw ? pw + 0.6 : 0, y: 0, width: 186 - (pw ? pw + 0.6 : 0), height: 5, rx: 1.2, fill: C.thanksL }));
@@ -639,7 +683,7 @@ function buildSheet() {
 
   // contribution graph, 53 weeks
   const G = D.graph53, cols = G.levels[0].length, pitch = 186 / cols, cell = pitch - 0.55;
-  const gs = svg("svg", { width: "186mm", height: `${4.2 + 7 * pitch}mm`, viewBox: `0 0 186 ${4.2 + 7 * pitch}`, role: "img", "aria-label": "Polite days over the last 12 months" });
+  const gs = svg("svg", { class: "s-wide", viewBox: `0 0 186 ${4.2 + 7 * pitch}`, role: "img", "aria-label": "Polite days over the last 12 months" });
   G.months.forEach(([c, label]) => gs.append(svg("text", { x: c * pitch, y: 2.9, "font-size": 2.7, fill: "#6E6386" }, label)));
   for (let r = 0; r < 7; r++) for (let c = 0; c < cols; c++) {
     const lv = G.levels[r][c];
@@ -648,20 +692,23 @@ function buildSheet() {
   const legend = el("span", { class: "s-legend" }, "less", ...C.rampL.map(col => el("i", { style: `background:${col}` })), "more");
   S.append(el("section", {}, el("div", { class: "s-head" }, el("h3", { text: "Every polite day, last 12 months" }), legend), gs));
 
-  // month by month (stacked) + how I say it
-  const mw = 88, mh = 34, top = 4, base = mh - 5, slot = mw / D.months.length, bw = Math.min(5, slot * 0.62);
+  // month by month (stacked) + how I say it. The bars are HTML so the chart can grow to the height of
+  // the column beside it without stretching its text: each bar is a share of its column, less 4 mm of
+  // headroom for the count on top.
   const maxM = Math.max(1, ...D.months.map(m => m.please + m.thanks));
-  const ms = svg("svg", { width: `${mw}mm`, height: `${mh}mm`, viewBox: `0 0 ${mw} ${mh}`, role: "img", "aria-label": "Nice words per month, please and thank you stacked" });
-  ms.append(svg("line", { x1: 0, x2: mw, y1: base + 0.15, y2: base + 0.15, stroke: "#E3DCF0", "stroke-width": 0.26 }));
-  D.months.forEach((m, i) => {
-    const x = i * slot + (slot - bw) / 2, total = m.please + m.thanks, scale = (base - top - 4) / maxM;
-    const hp = m.please * scale, ht = m.thanks * scale, gap = m.please && m.thanks ? 0.5 : 0;
-    if (m.please) ms.append(m.thanks ? svg("rect", { x, y: base - hp, width: bw, height: hp, fill: C.pleaseL }) : svg("path", { d: svgRoundTop(x, base - hp, bw, hp, 1), fill: C.pleaseL }));
-    if (m.thanks) ms.append(svg("path", { d: svgRoundTop(x, base - hp - gap - ht, bw, ht, 1), fill: C.thanksL }));
-    if (total) ms.append(svg("text", { x: x + bw / 2, y: base - hp - gap - ht - 1.2, "font-size": 2.4, "text-anchor": "middle", fill: "#1E1433" }, fmt(total)));
-    ms.append(svg("text", { x: x + bw / 2, y: base + 3.6, "font-size": 2.6, "text-anchor": "middle", fill: "#6E6386" }, m.label));
+  const ms = el("div", { class: "s-mchart", role: "img", "aria-label": "Nice words per month, please and thank you stacked" });
+  const part = n => `(100% - 4mm) * ${(n / maxM).toFixed(5)}`;
+  // past 10,000 a month the counts switch to 52.5k / 137k so neighbouring labels never run together
+  const short = n => maxM < 10000 ? fmt(n) : n < 1000 ? String(n) : `${+(n / 1000).toFixed(n < 100000 ? 1 : 0)}k`;
+  D.months.forEach(m => {
+    const col = el("div", { class: "s-mcol" }), total = m.please + m.thanks, gap = m.please && m.thanks ? " + .5mm" : "";
+    if (m.please) col.append(el("b", { ...(m.thanks ? {} : { class: "top" }), style: `bottom:0;height:calc(${part(m.please)});background:${C.pleaseL}` }));
+    if (m.thanks) col.append(el("b", { class: "top", style: `bottom:calc(${part(m.please)}${gap});height:calc(${part(m.thanks)});background:${C.thanksL}` }));
+    if (total) col.append(el("span", { style: `bottom:calc(${part(total)}${gap} + 1mm)`, text: short(total) }));
+    ms.append(col);
   });
-  const monthSec = el("section", {}, el("h3", { text: "Month by month" }), ms);
+  const monthSec = el("section", { class: "s-months" }, el("h3", { text: "Month by month" }), ms,
+    el("div", { class: "s-mlabels", "aria-hidden": "true" }, ...D.months.map(m => el("span", { text: m.label }))));
   const last = D.months[D.months.length - 1];
   if (last && last.partial) monthSec.append(el("p", { class: "s-note", text: `${last.label} is month to date.` }));
 
@@ -695,17 +742,43 @@ function buildSheet() {
     el("section", {}, el("h3", { text: "Hall of fame" }), dl)));
 
   S.append(el("section", {}, el("h3", { text: "Fun fact" }), el("p", { class: "s-fact", id: "s-fact" })));
-  fillFact();
 
-  // footer with a QR code to the plugin
-  const n = D.qr.length, qs = svg("svg", { width: "22mm", height: "22mm", viewBox: `-2 -2 ${n + 4} ${n + 4}`, role: "img", "aria-label": `QR code for ${linkShort()}` });
-  qs.append(svg("rect", { x: -2, y: -2, width: n + 4, height: n + 4, fill: "#fff" }));
+  // footer with a QR code to the plugin. The white page around it is its quiet zone, so its edge lines
+  // up with the text above.
+  const n = D.qr.length, qs = svg("svg", { width: "20mm", height: "20mm", viewBox: `0 0 ${n} ${n}`, role: "img", "aria-label": `QR code for ${linkShort()}` });
   let d = "";
   D.qr.forEach((row, r) => [...row].forEach((ch, c) => { if (ch === "#") d += `M${c},${r}h1v1h-1z`; }));
   qs.append(svg("path", { d, fill: "#1E1433", "shape-rendering": "crispEdges" }));
   S.append(el("footer", {}, qs, el("div", {},
     el("strong", { text: "Count your own pleases and thank-yous" }),
     el("span", { text: `nice-to-claude is a free plugin for Claude Code. Scan the code or visit ${linkShort()}` }))));
+  document.getElementById("sheet").append(S);
+  fillFact();
+}
+
+/* ── paper: Letter or A4 ────────────────────────────────────────────────── */
+const PAPERS = { letter: "letter", a4: "A4" };  // button / #hash name: CSS page size
+function hashPaper() { const h = location.hash.slice(1).toLowerCase(); return Object.hasOwn(PAPERS, h) ? h : null; }
+// #letter or #a4 on the URL wins; otherwise Letter in the US and Canada, A4 everywhere else
+function defaultPaper() { return hashPaper() || (/^en-(us|ca)\b/i.test(navigator.language || "") ? "letter" : "a4"); }
+function setPaper(key, remember) {
+  document.getElementById("sheet").dataset.paper = key;
+  document.getElementById("page-size").textContent = `@page { size: ${PAPERS[key]}; }`;
+  document.querySelectorAll(".paper-size button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.paper === key)));
+  if (remember) try { history.replaceState(null, "", `#${key}`); } catch { /* a file: page may not allow it; the choice still holds */ }
+  fitSheet();
+}
+// safety net for unusual fonts or a long fun fact: if the content runs taller than the page, shrink it
+// to fit. The preview on screen is drawn at the paper's real size, so measuring it measures the print.
+// Shrinking makes the text box wider and the full-width charts grow taller with it, so it takes a few rounds.
+function fitSheet() {
+  const box = document.querySelector("#sheet .s-in");
+  if (!box) return;
+  box.style.removeProperty("--fit");
+  for (let fit = 1, i = 0; i < 8 && box.scrollHeight > box.clientHeight; i++) {
+    fit *= 0.99 * box.clientHeight / box.scrollHeight;
+    box.style.setProperty("--fit", fit.toFixed(4));
+  }
 }
 
 /* ── start ──────────────────────────────────────────────────────────────── */
@@ -719,11 +792,11 @@ function start() {
   const fl = document.getElementById("foot-link"); fl.href = DATA.link; fl.textContent = "nice-to-claude";
   buildCards();
   buildSheet();
+  document.querySelectorAll(".paper-size button").forEach(b => b.addEventListener("click", () => setPaper(b.dataset.paper, true)));
+  window.addEventListener("hashchange", () => { const k = hashPaper(); if (k) setPaper(k); });
+  setPaper(defaultPaper());
   document.getElementById("print-btn").addEventListener("click", () => window.print());
-  // safety net for unusual fonts: if the summary ever runs taller than a Letter page, shrink it to fit
-  const sheet = document.getElementById("sheet"), maxPx = (255 * 96) / 25.4;
-  window.addEventListener("beforeprint", () => { const h = sheet.offsetHeight; if (h > maxPx) sheet.style.zoom = (maxPx / h).toFixed(3); });
-  window.addEventListener("afterprint", () => { sheet.style.zoom = ""; });
+  window.addEventListener("beforeprint", fitSheet);
   document.documentElement.dataset.ready = "1";
 }
 (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(start);
