@@ -8,7 +8,7 @@ How polite are you to Claude? A tiny Claude Code plugin that counts every **plea
 
 ## What you get
 
-- **`/nice-to-claude`**: a dashboard with a color heatmap, all-time / 30-day / 7-day stats, charts of how and when you're polite, and a random fun fact.
+- **`/nice-to-claude`**: a dashboard with your please/thanks split, a bar for each month, all-time / 30-day / 7-day stats, charts of how and when you're polite, and a random fun fact.
 - **Statusline**: all-time totals, this chat's count in parentheses, and a 7-day sparkline.
 - **Milestones**: a one-line message when you hit please #100, #500, #1,000 and so on.
 - **`/nice-to-claude audit`**: every recent match, and why it did or didn't count.

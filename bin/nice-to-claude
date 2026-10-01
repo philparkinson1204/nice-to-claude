@@ -20,7 +20,7 @@ import re
 import sys
 from collections import Counter
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 HISTORY = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_HISTORY", "~/.claude/history.jsonl"))
 CACHE_DIR = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_CACHE", "~/.cache/nice-to-claude"))
 
@@ -468,7 +468,6 @@ def _proj(p: str) -> str:
     return os.path.basename(p.rstrip("/")) or p
 
 
-HEAT_EMOJI = ["⬛", "🟫", "🟥", "🟧", "🟨"]  # colored in any terminal, so /nice-to-claude gets a real heatmap
 DAY_LABELS = {1: "Mon", 3: "Wed", 5: "Fri"}
 
 
@@ -504,13 +503,27 @@ def heatmap(rows: list[dict], today: dt.date, P: Paint) -> list[str]:
     return out
 
 
-def heatmap_emoji(rows: list[dict], today: dt.date, weeks: int = 26) -> list[str]:
-    months, grid = _heat_grid(rows, today, weeks, 2)
-    out = ["     " + months]
-    for row, cells in enumerate(grid):
-        out.append(f" {DAY_LABELS.get(row, ''):<3} " + "".join("  " if lv is None else HEAT_EMOJI[lv] for lv in cells))
-    out.append("")
-    out.append("     Less " + " ".join(HEAT_EMOJI) + " More")
+def month_bars(rows: list[dict], today: dt.date, months: int = 12) -> list[str]:
+    """one orange bar per month (up to the last `months`), number at the end, best month called out"""
+    per_month = Counter()
+    for r in rows:
+        if r["counted"]:
+            per_month[(r["day"].year, r["day"].month)] += len(r["counted"])
+    if not per_month:
+        return []
+    first = min(per_month)
+    keys, y, m = [], today.year, today.month
+    while len(keys) < months and (y, m) >= first:
+        keys.append((y, m))
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    keys.reverse()
+    top = max(per_month[k] for k in keys) or 1
+    best = max(keys, key=lambda k: per_month[k])
+    out = []
+    for k in keys:
+        n = per_month[k]
+        note = "  ← best month" if k == best and n else "  (so far)" if k == (today.year, today.month) else ""
+        out.append(f"{dt.date(*k, 1).strftime('%b')}  {_emoji_bar(n, top, 10, '🟧')}  {n:>5,}{note}")
     return [ln.rstrip() for ln in out]
 
 
@@ -669,13 +682,15 @@ def dashboard_md() -> str:
     since = F["since"]
     out = ["## 🙏 Nice to Claude", "",
            f"*How polite you've been to Claude · tracking since {since.strftime('%b')} {since.day}, {since.year}*", "",
-           "```text"] + heatmap_emoji(rows, today) + ["```", ""]
+           ]
     p, t = S["fam"]["please"], S["fam"]["thanks"]
     if p + t:
         k = round(p / (p + t) * 20)
         out += [f"{FAM_SQ['please'] * k}{FAM_SQ['thanks'] * (20 - k)}", "",
-                f"🫶 **{p:,}** pleases · 🙏 **{t:,}** thank-yous · **{p / (p + t):.0%}** asking, "
-                f"**{t / (p + t):.0%}** thanking", ""]
+                f"{FAM_SQ['please']} **{p / (p + t):.0%} please** ({p:,}) · "
+                f"{FAM_SQ['thanks']} **{t / (p + t):.0%} thanks** ({t:,})", ""]
+    if bars := month_bars(rows, today):
+        out += ["### 📅 Month by month", "", "```text"] + bars + ["```", ""]
     out.append("| | " + " | ".join(label for label, _ in RANGES) + " |")
     out.append("|:--|" + "--:|" * len(RANGES))
     icons = {"Pleases": "🫶", "Thank-yous": "🙏", "Polite days": "📅", "Per day": "📈"}

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.0
+
+- `/nice-to-claude` swaps the 26-week heatmap for one bar per month, with the count at the end and your best month marked.
+- The please/thanks bar is labeled: `🟧 87% please · 🟪 13% thanks`.
+
 ## 1.5.0
 
 - Renamed everything to nice-to-claude: the plugin, the marketplace, the `/nice-to-claude` command, the `nice-to-claude` script and the `~/.cache/nice-to-claude` cache.
