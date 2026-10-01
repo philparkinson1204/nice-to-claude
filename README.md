@@ -27,7 +27,7 @@ claude plugin marketplace add philparkinson1204/nice-to-claude
 claude plugin install nice-to-claude@nice-to-claude
 ```
 
-Restart Claude Code and run `/nice-to-claude`.
+Restart Claude Code and run `/nice-to-claude`. If another plugin or skill already uses that name, the full name `/nice-to-claude:nice-to-claude` always works.
 
 ### Statusline (optional)
 

@@ -3,6 +3,8 @@
 ## 1.1.0
 
 - `/nice-to-claude share`: four share cards (Summary, Milestone, Streak and Receipt) to download as PNGs or copy, with captions and post links for X, Bluesky, Threads and LinkedIn, plus a one-page summary to print or save as a PDF. Everything is drawn in your browser from a local file, with nothing loaded from the internet.
+- `/nice-to-claude` works as typed. It was a command, which Claude Code only runs by its full name (`/nice-to-claude:nice-to-claude`). It's now a skill, which also answers to the short name.
+- The command's settings block is valid YAML now, so stricter checkers (like the plugin directory's) can read it.
 - Milestone messages now point to `/nice-to-claude share`.
 - Fun facts read right with very small numbers ("your one nice word", "~1 token").
 
