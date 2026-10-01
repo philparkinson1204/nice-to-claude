@@ -20,7 +20,7 @@ import re
 import sys
 from collections import Counter
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 HISTORY = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_HISTORY", "~/.claude/history.jsonl"))
 CACHE_DIR = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_CACHE", "~/.cache/nice-to-claude"))
 
@@ -503,12 +503,14 @@ def heatmap(rows: list[dict], today: dt.date, P: Paint) -> list[str]:
     return out
 
 
-def month_bars(rows: list[dict], today: dt.date, months: int = 12) -> list[str]:
-    """one orange bar per month (up to the last `months`), number at the end, best month called out"""
-    per_month = Counter()
+def month_bars(rows: list[dict], today: dt.date, months: int = 12, width: int = 12) -> list[str]:
+    """one bar per month (up to the last `months`): 🟧 pleases then 🟪 thank-yous, so the purple share
+    of each bar is that month's thank-you share; number at the end, best month called out"""
+    per_month = {}
     for r in rows:
         if r["counted"]:
-            per_month[(r["day"].year, r["day"].month)] += len(r["counted"])
+            per_month.setdefault((r["day"].year, r["day"].month), Counter()).update(
+                h["family"] for h in r["counted"])
     if not per_month:
         return []
     first = min(per_month)
@@ -517,13 +519,18 @@ def month_bars(rows: list[dict], today: dt.date, months: int = 12) -> list[str]:
         keys.append((y, m))
         y, m = (y, m - 1) if m > 1 else (y - 1, 12)
     keys.reverse()
-    top = max(per_month[k] for k in keys) or 1
-    best = max(keys, key=lambda k: per_month[k])
-    out = []
+    total = {k: sum(per_month.get(k, Counter()).values()) for k in keys}
+    top = max(total.values()) or 1
+    best = max(keys, key=lambda k: total[k])
+    out = [f"     {FAM_SQ['please']} please  {FAM_SQ['thanks']} thanks", ""]
     for k in keys:
-        n = per_month[k]
+        n, t = total[k], per_month.get(k, Counter())["thanks"]
+        size = max(1, int(n / top * width + 0.5)) if n else 0
+        purple = int(t / n * size + 0.5) if n else 0
+        bar = FAM_SQ["please"] * (size - purple) + FAM_SQ["thanks"] * purple + "  " * (width - size)
         note = "  ← best month" if k == best and n else "  (so far)" if k == (today.year, today.month) else ""
-        out.append(f"{dt.date(*k, 1).strftime('%b')}  {_emoji_bar(n, top, 10, '🟧')}  {n:>5,}{note}")
+        pct = f" · {t / n:>3.0%} {FAM_SQ['thanks']}" if n else ""
+        out.append(f"{dt.date(*k, 1).strftime('%b')}  {bar}  {n:>5,}{pct}{note}")
     return [ln.rstrip() for ln in out]
 
 
@@ -582,6 +589,77 @@ def fun_facts(S: dict) -> list[str]:
             F.append(f"Peak politeness hits at {_hour(h)}. Schedule your big asks accordingly.")
     if S["longest"] >= 5:
         F.append(f"Longest politeness streak: {S['longest']} days in a row. Unbroken. Slightly unhinged.")
+    F += more_facts(S)
+    return F
+
+
+def more_facts(S: dict) -> list[str]:
+    """the sillier one-liners, each only when the numbers back it up"""
+    p, t = S["fam"]["please"], S["fam"]["thanks"]
+    n, k, F = p + t, S["kinds"], []
+    if k["pls"] >= 20:
+        F.append(f"You've typed “pls” {k['pls']:,} times. Polite, but in a hurry. Manners on 2x speed.")
+    if k["thx"] >= 20:
+        F.append(f"{k['thx']:,} “thx”. Gratitude with the vowels removed to save time.")
+    if S["typos"]:
+        w, c = S["typos"].most_common(1)[0]
+        if c >= 10:
+            F.append(f"You've typed “{w}” {c} times. Claude knew what you meant. Claude always knows.")
+    if S["begs"] >= 50:
+        F.append(f"{S['begs']:,} prompts with more than one please. At some point that stopped being manners "
+                 f"and became a strategy.")
+    if S["most_pleases"] >= 3:
+        F.append(f"Your record is {S['most_pleases']} pleases in one prompt. Claude would've done it after the "
+                 f"first one. The other {S['most_pleases'] - 1} were emotional support.")
+    if S["most_pleases"] >= 4:
+        F.append(f"{S['most_pleases']} pleases in a single prompt. Somewhere, a customer service rep felt that.")
+    wkend = sum(v for d, v in S["per_day"].items() if d.weekday() >= 5)
+    wkday = sum(S["per_day"].values()) - wkend
+    if wkday >= 200 and wkend / (wkday + wkend) < 0.05:
+        F.append(f"Weekdays: {wkday:,} nice words. Weekends: {wkend:,}. You and Claude are strictly work friends.")
+    late = sum(S["per_hour"][h] for h in range(0, 5))
+    if late >= 5:
+        F.append(f"{late:,} nice words sent between midnight and 5 AM. Polite, even while making questionable "
+                 f"life choices.")
+    am, pm = sum(S["per_hour"][h] for h in range(6, 12)), sum(S["per_hour"][h] for h in range(12, 18))
+    if am + pm >= 50:
+        if pm > am * 1.3:
+            F.append("Your manners peak after lunch. Morning you is all business.")
+        elif am > pm * 1.3:
+            F.append("You're politest before noon. Coffee you is a nicer person.")
+    if S["skipped"]["email"] >= 10:
+        F.append(f"{S['skipped']['email']:,} pleases and thanks didn't count because they were in emails you pasted. "
+                 f"Claude knows when you're being nice to someone else.")
+    if t and p / t >= 4:
+        F.append(f"For every thank-you, you ask nicely {p / t:.0f} times. Claude is starting a tab.")
+    if S["active"] and len(S["polite"]) / len(S["active"]) >= 0.9:
+        F.append(f"You said please or thanks on {len(S['polite']) / len(S['active']):.0%} of the days you used "
+                 f"Claude. Basically a saint.")
+    if p >= 100:
+        F.append(f"{p:,} pleases from you. Claude has said “You're absolutely right!” about as many times. "
+                 f"Fair trade.")
+        F.append(f"If Claude charged a penny per please, you'd owe ${p / 100:,.2f}. Good news: manners are free. "
+                 f"Bad news: tokens aren't.")
+    if n >= 100:
+        F.append(f"{n:,} nice words on record. When the robots take over, you're getting the good charging cable.")
+    if S["per_proj"]:
+        proj = _proj(S["per_proj"].most_common(1)[0][0])
+        where = "your home folder" if proj == "~" else proj
+        F.append(f"You're politest in {where}. Whatever lives in there needs a lot of asking nicely.")
+    if S["per_day"]:
+        d, c = max(S["per_day"].items(), key=lambda kv: kv[1])
+        if c >= 10:
+            F.append(f"Your politest day was {d.strftime('%b')} {d.day}: {c} nice words. Whatever broke that day, "
+                     f"it broke politely.")
+    if S["prompts"] >= 500 and S["please_prompts"]:
+        F.append(f"You've sent {S['prompts']:,} prompts and {S['please_prompts']:,} of them said please. "
+                 f"The rest were emergencies.")
+    if S["current"] >= 3:
+        F.append(f"{S['current']}-day streak and counting. Don't break it now. Claude isn't watching. "
+                 f"(Claude is watching.)")
+    if p / S["span_days"] >= 5:
+        F.append(f"{p / S['span_days']:.0f} pleases a day. That's more than most toddlers manage, and people "
+                 f"remind them constantly.")
     return F
 
 

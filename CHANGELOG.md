@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.0
+
+- Month by month bars are split: 🟧 for pleases, then 🟪 for that month's share of thank-yous, with the thank-you percent after each count.
+- 20 new fun facts, from `pls` on 2x speed to strictly-work-friends weekends. Each one only shows when your numbers back it up.
+
 ## 1.6.0
 
 - `/nice-to-claude` swaps the 26-week heatmap for one bar per month, with the count at the end and your best month marked.
