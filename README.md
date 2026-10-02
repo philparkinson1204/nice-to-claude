@@ -92,6 +92,8 @@ Everything runs on your machine, and the plugin makes no network requests of its
 
 Uninstalling doesn't touch your history file. Delete `~/.cache/nice-to-claude/` to remove the cache.
 
+Full details: [Privacy policy](PRIVACY.md).
+
 ## Other ways to run it
 
 `nice-to-claude` is on your PATH while the plugin is enabled:
