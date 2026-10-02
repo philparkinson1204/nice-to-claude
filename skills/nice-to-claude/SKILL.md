@@ -2,7 +2,7 @@
 name: nice-to-claude
 description: "How polite are you to Claude? Your please & thank-you dashboard (or: share, audit [skipped|counted])"
 argument-hint: "[share | audit [skipped|counted]]"
-allowed-tools: Bash(python3:*)
+allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/bin/nice-to-claude" *) Bash(python3 ${CLAUDE_PLUGIN_ROOT}/bin/nice-to-claude *)
 model: haiku
 disable-model-invocation: true
 ---
