@@ -598,11 +598,12 @@ def fun_facts(S: dict) -> list[str]:
         rate = S["please_prompts"] / S["prompts"]
         if rate >= 0.05:
             F.append(f"{rate:.0%} of your prompts say please. Your mom would be proud.")
-    if p and p / S["span_days"] >= 0.5:
+    if p and p / S["span_days"] >= 0.5 and p < 211_000:  # past 211,000 you've already matched it
         per_day = p / S["span_days"]
-        yrs = (211_000 - p) / per_day / 365
-        rate = f"{per_day:.0f} pleases" if per_day >= 1.5 else "1 please"
-        F.append(f"At {rate} a day, you'll match the word count of Crime and Punishment in {yrs:,.0f} years.")
+        left = (211_000 - p) / per_day  # days to go
+        when = f"{left / 365:,.0f} years" if left >= 547 else f"{left:,.0f} days" if left >= 1.5 else "a day"
+        rate = f"{per_day:,.0f} pleases" if per_day >= 1.5 else "1 please"
+        F.append(f"At {rate} a day, you'll match the word count of Crime and Punishment in {when}.")
     if S["typos"]:
         ex = ", ".join(f"“{w}”" for w, _ in S["typos"].most_common(2))
         F.append(f"You've fat-fingered please/thanks {sum(S['typos'].values()):,} times ({ex}). It's the thought "
@@ -692,7 +693,7 @@ def more_facts(S: dict) -> list[str]:
         F.append(f"{S['current']}-day streak and counting. Don't break it now. Claude isn't watching. "
                  f"(Claude is watching.)")
     if p / S["span_days"] >= 5:
-        F.append(f"{p / S['span_days']:.0f} pleases a day. That's more than most toddlers manage, and people "
+        F.append(f"{p / S['span_days']:,.0f} pleases a day. That's more than most toddlers manage, and people "
                  f"remind them constantly.")
     return F
 
@@ -754,11 +755,14 @@ def dashboard(color: bool) -> str:
     pairs = [
         (("Favorite nice word", P.o(F["fav"] or "none yet")), ("Politest day", P.o(bday))),
         (("Current streak", P.o(_plural(S["current"], "day"))), ("Longest streak", P.o(_plural(S["longest"], "day")))),
-        (("Politest hour", P.o(F["bhour"])), ("Politest project", P.o(bp[:22]))),
+        (("Politest hour", P.o(F["bhour"])), ("Politest project", P.o(bp))),
     ]
     for (l1, v1), (l2, v2) in pairs:
-        left = f"{l1}: {v1}"
-        out.append("  " + left + " " * max(2, 34 - _vlen(left)) + f"{l2}: {v2}")
+        left, right = f"{l1}: {v1}", f"{l2}: {v2}"
+        if 34 + _vlen(right) <= 76:
+            out.append("  " + left + " " * max(2, 34 - _vlen(left)) + right)
+        else:  # a long project name gets its own line instead of being cut off
+            out += ["  " + left, "  " + right]
     out.append("")
     for line in _wrap([f"{k} {n:,}" for k, n, _ in F["kinds"]], 74):
         out.append("  " + P.d(line))

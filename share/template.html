@@ -104,8 +104,8 @@
   #sheet .s-split-labels { display: flex; justify-content: space-between; margin-top: 1.6mm; font-size: 9.5pt; }
   #sheet .s-split-labels span { display: inline-flex; align-items: center; gap: 1.6mm; }
   #sheet .sw { display: inline-block; width: 3mm; height: 3mm; border-radius: .6mm; }
-  #sheet .s-bars { display: grid; grid-template-columns: 27mm 1fr minmax(11mm, max-content); align-items: center; row-gap: 1.3mm; column-gap: 2mm; }
-  #sheet .s-bars .l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sheet .s-bars { display: grid; grid-template-columns: minmax(27mm, max-content) 1fr minmax(11mm, max-content); align-items: center; row-gap: 1.3mm; column-gap: 2mm; }
+  #sheet .s-bars .l { white-space: nowrap; }
   #sheet .s-bars .l small { color: #6E6386; font-size: 7.5pt; margin-left: 1mm; }
   #sheet .s-bars .v { text-align: right; }
   #sheet .s-track { height: 2.6mm; }
@@ -204,14 +204,15 @@ function wrap(ctx, text, maxW) {
   if (line) lines.push(line);
   return lines;
 }
-/* the biggest size (stepping down) at which `text` wraps into maxLines or fewer */
-function fitWrap(ctx, text, maxW, maxLines, size, min, weight, fam = "sans", style = "normal") {
-  for (let s = size; s >= min; s -= 2) {
+/* the biggest size (stepping down) at which `text` wraps into maxLines or fewer. It goes below `min`, as
+   far as `floor`, before it would ever cut the text short with "…" */
+function fitWrap(ctx, text, maxW, maxLines, size, min, weight, fam = "sans", style = "normal", floor = min) {
+  for (let s = size; s >= floor; s -= 2) {
     font(ctx, weight, s, fam, style);
     const lines = wrap(ctx, text, maxW);
     if (lines.length <= maxLines) return { size: s, lines };
   }
-  font(ctx, weight, min, fam, style);
+  font(ctx, weight, floor, fam, style);
   let lines = wrap(ctx, text, maxW);
   if (lines.length > maxLines) {
     lines = lines.slice(0, maxLines);
@@ -219,13 +220,17 @@ function fitWrap(ctx, text, maxW, maxLines, size, min, weight, fam = "sans", sty
     while (last && ctx.measureText(last + "…").width > maxW) last = last.replace(/\s*\S+$/, "");
     lines[maxLines - 1] = last + "…";
   }
-  return { size: min, lines };
+  return { size: floor, lines };
 }
 /* the biggest size at which one line fits in maxW */
 function fitLine(ctx, text, maxW, size, min, weight, fam = "sans", style = "normal") {
   for (let s = size; s > min; s -= 2) { font(ctx, weight, s, fam, style); if (ctx.measureText(text).width <= maxW) return s; }
   font(ctx, weight, min, fam, style);
-  return min;
+  const w = ctx.measureText(text).width;
+  if (w <= maxW) return min;
+  const s = Math.max(8, Math.floor((min * maxW) / w));  // still too wide at `min`: shrink to fit rather than overflow
+  font(ctx, weight, s, fam, style);
+  return s;
 }
 function rr(ctx, x, y, w, h, r) {
   const k = Math.max(0, Math.min(r, w / 2, h / 2));
@@ -299,12 +304,12 @@ function drawSummary(ctx, st) {
   // measure before drawing: the headline, the heatmap and the whole fun fact. Big totals make the headline
   // four lines, so when that and a long fact would crowd the footer, the gaps between the blocks give up
   // some room (up to GIVE px each) and the fact keeps its punchline.
-  const hl = fitWrap(ctx, headline(), inner, 4, 84, 56, 800);
+  const hl = fitWrap(ctx, headline(), inner, 4, 84, 56, 800, "sans", "normal", 40);
   const lh = Math.round(hl.size * 1.07);
   const G = D.graph26, cols = G.levels[0].length, cg = 6, cell = (inner - (cols - 1) * cg) / cols;
   const fact = D.facts[st.fact] || "", whole = f => f.lines.join(" ") === fact.split(/\s+/).filter(Boolean).join(" ");
   let ff = fitWrap(ctx, fact, inner, 2, 34, 28, 500, "sans", "italic");
-  if (!whole(ff)) ff = fitWrap(ctx, fact, inner, 3, 34, 26, 500, "sans", "italic");
+  if (!whole(ff)) ff = fitWrap(ctx, fact, inner, 3, 34, 26, 500, "sans", "italic", 18);
   const GAP = [62, 82, 84, 112], GIVE = [28, 26, 24, 20], sum = a => a.reduce((s, n) => s + n, 0);
   const natural = 168 + hl.size * 0.8 + (hl.lines.length - 1) * lh + 30 + 48 + 44 + 16 + 7 * cell + 6 * cg
                 + sum(GAP) + (ff.lines.length - 1) * Math.round(ff.size * 1.35);
@@ -370,7 +375,7 @@ function drawSummary(ctx, st) {
   // fun fact, whole. Only if even the tightest gaps can't make room does it get cut short with "…".
   y += space(3);
   const room = Math.floor((H - 128 - y) / Math.round(ff.size * 1.35)) + 1;
-  if (ff.lines.length > room) ff = fitWrap(ctx, fact, inner, Math.max(1, Math.min(3, room)), 34, 26, 500, "sans", "italic");
+  if (ff.lines.length > room) ff = fitWrap(ctx, fact, inner, Math.max(1, Math.min(3, room)), 34, 26, 500, "sans", "italic", 18);
   font(ctx, 500, ff.size, "sans", "italic");
   ctx.fillStyle = C.onDarkSoft;
   ff.lines.forEach((line, i) => ctx.fillText(line, M, y + i * Math.round(ff.size * 1.35)));
@@ -525,10 +530,14 @@ function drawReceipt(ctx) {
       ctx.fillText(l.s, pw / 2, base); ctx.textAlign = "left";
     } else if (l.t === "row") {
       font(ctx, l.w || 500, l.size || 27, "mono");
-      ctx.fillText(l.l, x0, base); ctx.textAlign = "right"; ctx.fillText(l.r, x1, base); ctx.textAlign = "left";
+      const room = x1 - x0 - ctx.measureText(l.r).width - 24;  // the left side never runs into the right
+      ctx.save(); fitLine(ctx, l.l, room, l.size || 27, 14, l.w || 500, "mono"); ctx.fillText(l.l, x0, base); ctx.restore();
+      ctx.textAlign = "right"; ctx.fillText(l.r, x1, base); ctx.textAlign = "left";
     } else if (l.t === "item") {
       font(ctx, 500, 27, "mono");
-      ctx.fillText(l.l, x0, base); ctx.textAlign = "right"; ctx.fillText(l.q, xq, base); ctx.fillText(l.r, x1, base); ctx.textAlign = "left";
+      const room = xq - ctx.measureText(l.q).width - 18 - x0;  // the item name never runs into its count
+      ctx.save(); fitLine(ctx, l.l, room, 27, 14, 500, "mono"); ctx.fillText(l.l, x0, base); ctx.restore();
+      ctx.textAlign = "right"; ctx.fillText(l.q, xq, base); ctx.fillText(l.r, x1, base); ctx.textAlign = "left";
     } else if (l.t === "qr") {
       drawQR(ctx, pw / 2 - qr / 2, y + 8, qr, "#231B2E");
     }
