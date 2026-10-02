@@ -2,6 +2,8 @@
 
 How polite are you to Claude? A tiny Claude Code plugin that counts every **please** and **thank you** you type, with a `/stats`-style dashboard and a statusline counter.
 
+![Three nice-to-claude share cards: a summary of 2,408 pleases and 358 thank-yous with a six-month heatmap and a fun fact, a "please #2,000" milestone sticker, and a receipt for 2,766 nice words with $0.00 due](assets/share-cards.png)
+
 ```
 🫶 2,362 (▲ +4 please) · 🙏 340 (▲ +4 thanks) · ▃▃▅▄··█ · 🔥 3d
 ```
