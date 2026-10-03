@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2
+
+- Opening `/nice-to-claude` now really creates the statusline launcher, even with hooks turned off. The script finds its own path instead of relying on `$CLAUDE_PLUGIN_ROOT`, which Claude Code doesn't give a skill's commands.
+- The statusline setup hint shows only when no status line is set at all. It checks `settings.json` and `settings.local.json`, for your user and for the project, so a status line that has Nice to Claude merged into a custom script no longer gets nagged.
+- The terminal dashboard's hint now also says to merge into an existing custom status line instead of replacing it.
+- Tidier `/nice-to-claude` ending: no `---` line before the setup hint.
+- Version numbers now match everywhere (plugin, marketplace entry and script).
+
 ## 1.0.1
 
 - Makes the statusline's one-time setup clear in the dashboard, README and directory description.

@@ -9,7 +9,7 @@
       "name": "nice-to-claude",
       "source": "./",
       "description": "Count every please and thank you you type into Claude Code.",
-      "version": "1.0.0"
+      "version": "1.0.2"
     }
   ]
 }

@@ -33,7 +33,7 @@ Once it's listed in the Claude plugin directory, you can also run `/plugin` in C
 
 ### Statusline (optional — one-time setup)
 
-Claude Code doesn't let plugins enable a status line automatically. After installing, send one message, then run `/statusline` and ask Claude:
+Claude Code doesn't let plugins enable a status line automatically. After installing, open `/nice-to-claude` once (or send any message), then run `/statusline` and ask Claude:
 
 > Use Nice to Claude's status line with `sh ~/.cache/nice-to-claude/statusline.sh`.
 
