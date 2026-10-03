@@ -733,6 +733,7 @@ def _facts_for(rows: list[dict], today: dt.date) -> dict:
 
 
 def dashboard(color: bool) -> str:
+    _refresh_launcher()
     P = Paint(color)
     today = dt.date.today()
     rows = analyze(load_prompts())
@@ -773,6 +774,11 @@ def dashboard(color: bool) -> str:
     out.append("")
     for line in _wrap(F["fact"].split(" "), 74, sep=" "):
         out.append("  " + P.v(line))
+    if not _statusline_configured():
+        out += ["",
+                "  " + P.v("✨ Want the live counter in your status line?"),
+                "  " + P.d("Run /statusline and ask Claude to add Nice to Claude using:"),
+                "  " + P.o("sh ~/.cache/nice-to-claude/statusline.sh")]
     out.append("")
     return "\n".join(out)
 
@@ -791,6 +797,7 @@ def _emoji_bar(n: int, top: int, width: int, sq: str) -> str:
 def dashboard_md() -> str:
     """markdown for /nice-to-claude: Claude Code renders the headings, bold, `code` color, tables and emoji,
     so it stays colorful even though a slash command has to go through the model"""
+    _refresh_launcher()
     today = dt.date.today()
     rows = analyze(load_prompts())
     F = _facts_for(rows, today)
@@ -842,6 +849,12 @@ def dashboard_md() -> str:
         out += ["", f"*🧹 {F['skipped_n']:,} fake pleases ignored (pasted emails & chats, drafts, quotes, "
                     f"talking about the word)*"]
     out += ["", f"> ✨ {F['fact']}"]
+    if not _statusline_configured():
+        out += ["", "---", "",
+                "✨ **Want the live counter in your status line?**", "",
+                "Claude Code doesn't let plugins enable status lines automatically. Run `/statusline` and ask Claude to add Nice to Claude using:", "",
+                "`sh ~/.cache/nice-to-claude/statusline.sh`", "",
+                "*Already use a custom status line? Ask Claude to merge this into it instead of replacing it.*"]
     return "\n".join(out)
 
 
@@ -993,6 +1006,24 @@ def _refresh_launcher() -> None:
         os.replace(tmp, path)
     except OSError:
         pass
+
+
+def _statusline_configured() -> bool:
+    """whether Claude Code settings already point at Nice to Claude's statusline"""
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude"
+    path = os.path.expanduser(os.path.join(config_dir, "settings.json"))
+    try:
+        with open(path, encoding="utf-8") as fh:
+            settings = json.load(fh)
+    except (OSError, ValueError, TypeError):
+        return False
+    if not isinstance(settings, dict):
+        return False
+    status = settings.get("statusLine")
+    if not isinstance(status, dict):
+        return False
+    command = str(status.get("command") or "").lower()
+    return "statusline.sh" in command and "nice-to-claude" in command
 
 
 def hook() -> None:

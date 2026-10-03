@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+- Makes the statusline's one-time setup clear in the dashboard, README and directory description.
+- Shows a setup hint at the bottom of `/nice-to-claude` only until the Nice to Claude statusline is detected in Claude Code settings.
+- Refreshes the local statusline launcher when the dashboard opens, so setup works even before the next regular prompt.
+
 ## 1.0.0
 
 First release.

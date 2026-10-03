@@ -11,7 +11,7 @@ How polite are you to Claude? A tiny Claude Code plugin that counts every **plea
 ## What you get
 
 - **`/nice-to-claude`**: a dashboard with your please/thanks split, a bar for each month, all-time / 30-day / 7-day stats, charts of how and when you're polite, and a random fun fact.
-- **Statusline**: all-time totals, this chat's count in parentheses, and a 7-day sparkline.
+- **Optional statusline**: live all-time totals, this chat's count in parentheses, and a 7-day sparkline — one-time setup required.
 - **Milestones**: a one-line message when you hit please #100, #500, #1,000 and so on.
 - **`/nice-to-claude share`**: share cards for your stats, opened in your browser (see below).
 - **`/nice-to-claude audit`**: every recent match, and why it did or didn't count.
@@ -31,15 +31,21 @@ Restart Claude Code and run `/nice-to-claude`. If another plugin or skill alread
 
 Once it's listed in the Claude plugin directory, you can also run `/plugin` in Claude Code, search for **nice-to-claude**, and install it from there.
 
-### Statusline (optional)
+### Statusline (optional — one-time setup)
 
-Plugins can't set the statusline themselves, so add this to `~/.claude/settings.json`:
+Claude Code doesn't let plugins enable a status line automatically. After installing, send one message, then run `/statusline` and ask Claude:
+
+> Use Nice to Claude's status line with `sh ~/.cache/nice-to-claude/statusline.sh`.
+
+If you already use a custom status line, ask Claude to merge Nice to Claude into it instead of replacing it.
+
+Prefer to configure it manually? Add this to `~/.claude/settings.json`:
 
 ```json
 "statusLine": { "type": "command", "command": "sh ~/.cache/nice-to-claude/statusline.sh", "padding": 0, "refreshInterval": 10 }
 ```
 
-The plugin's install folder changes with every update, so it keeps that small launcher pointed at the current version. The launcher is created the first time you send a message after installing, so the counter shows up from then on.
+The plugin's install folder changes with every update, so it keeps that small launcher pointed at the current version. The launcher is created when you send a message or open `/nice-to-claude` after installing.
 
 `refreshInterval` keeps the totals in sync when you have several Claude Code windows open. Without it, a window only updates when something happens in it. Each refresh takes about 30 ms.
 

@@ -1,4 +1,4 @@
-nice-to-claude 1.0.0: how polite are you to Claude?
+nice-to-claude 1.0.1: how polite are you to Claude?
 ====================================================
 
 Needs Claude Code and Python 3.8+ as python3. On a Mac, run python3 --version
@@ -13,7 +13,8 @@ in a terminal; if it offers to install the developer tools, say yes.
 
 3. Restart Claude Code and type /nice-to-claude
 
-Optional statusline counter: see "Statusline" in README.md.
+Optional statusline counter: send one message, run /statusline, and ask Claude to use
+sh ~/.cache/nice-to-claude/statusline.sh (or see "Statusline" in README.md).
 
 Everything runs on your own machine. It reads ~/.claude/history.jsonl
 and keeps a small counts-only cache in ~/.cache/nice-to-claude/.
