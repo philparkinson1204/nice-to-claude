@@ -100,14 +100,16 @@ Uninstalling doesn't touch your history file. Delete `~/.cache/nice-to-claude/` 
 
 Full details: [Privacy policy](PRIVACY.md).
 
-## Other ways to run it
+## Run the source directly (optional)
 
-`nice-to-claude` is on your PATH while the plugin is enabled:
+The plugin ships a readable, non-executable Python source file at `scripts/nice_to_claude.py`, not a command in `bin/` or on your `PATH`. The `/nice-to-claude` skill and prompt hook invoke it with `python3` automatically.
+
+From a checkout of this repository, you can run:
 
 ```sh
-! nice-to-claude            # the dashboard, from Claude Code's bash mode
-! nice-to-claude audit skipped  # what was thrown out, and why
-! nice-to-claude share --no-open  # make the share page without opening a browser
+python3 scripts/nice_to_claude.py --plain
+python3 scripts/nice_to_claude.py audit skipped
+python3 scripts/nice_to_claude.py share --no-open
 ```
 
 To uninstall, run `claude plugin uninstall nice-to-claude@nice-to-claude`, remove the `statusLine` entry and delete `~/.cache/nice-to-claude/`.
