@@ -1,0 +1,1342 @@
+"""nice-to-claude: a /stats-style dashboard of how often you say please & thank you to Claude.
+
+Reads ~/.claude/history.jsonl, or $CLAUDE_CONFIG_DIR/history.jsonl (every prompt you've typed into Claude Code), and
+counts the pleases and thank-yous, context-aware: quoted text, UI/customer copy, drafted or
+pasted emails, and "how many times have I said please" meta-talk don't count.
+
+  python3 scripts/nice_to_claude.py [--md|--plain]            dashboard (--md is what /nice-to-claude shows)
+  python3 scripts/nice_to_claude.py statusline                one compact line for Claude Code's statusLine
+  python3 scripts/nice_to_claude.py audit [skipped|counted] [N]  recent matches and why they did or didn't count
+  python3 scripts/nice_to_claude.py share [--no-open]         share cards + a printable one-pager, opened in your browser
+  python3 scripts/nice_to_claude.py hook                      UserPromptSubmit hook: milestone messages
+"""
+from __future__ import annotations
+
+import datetime as dt
+import hashlib
+import json
+import os
+import pathlib
+import random
+import re
+import shutil
+import subprocess
+import sys
+from collections import Counter
+
+VERSION = "1.0.3"
+HISTORY = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_HISTORY")
+                             or os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude", "history.jsonl"))
+CACHE_DIR = os.path.expanduser(os.environ.get("NICE_TO_CLAUDE_CACHE", "~/.cache/nice-to-claude"))
+
+# ───────────────────────────── detection ─────────────────────────────
+
+FAMILY = {
+    "please": "please", "pls": "please", "pretty please": "please", "please (typo)": "please",
+    "thank you": "thanks", "thanks": "thanks", "thx": "thanks", "ty": "thanks",
+    "appreciate it": "thanks", "thanks (typo)": "thanks",
+}
+
+_PATTERNS = [
+    ("pretty please", r"pretty\s+ple+a+s+e+"),
+    ("please",        r"ple+a+s+e+|puh-?le+a+s+e+"),
+    ("pls",           r"pl[sz]+|plox|pleez+|plis+|plx"),
+    ("thank you",     r"thank[\s-]*(?:yo+u+|u+|yu|ya|yoi|yuo|uou|yiu|yoo)"),
+    ("thanks",        r"thanks+|thanx+|thanku+|thanq"),
+    ("thx",           r"thx+|thnx+|thnks|tnx|tks"),
+    ("ty",            r"ty(?:sm|vm|sfm|y+)?"),
+    ("appreciate it", r"(?:i|we)\s+(?:really\s+|truly\s+|so\s+|do\s+|def\s+|definitely\s+|genuinely\s+)?appreciate"
+                      r"|appreciate\s+(?:it|you|u|ya|ur|your|the\s+help)"
+                      r"|(?:much|greatly|really|very|truly)\s+appreciated"),
+]
+_KINDS = [k for k, _ in _PATTERNS]
+NICE_RE = re.compile(
+    r"(?<![\w-])(?:" + "|".join(f"(?P<g{i}>{p})" for i, (_, p) in enumerate(_PATTERNS)) + r")(?![\w-])"
+)
+# words that talk ABOUT pleases and thanks; they glue a list like "please, pls, ty" into meta-talk
+META_RE = re.compile(r"(?<![\w-])(?:pleases|thanks?[\s-]?yous|thankyous|niceties|nicety|manners|"
+                     r"politeness|variations?|variants?|etc)(?![\w-])")
+THANK_NOT_AIMED_RE = re.compile(r"(?<![\w-])thank\s+(?:god|goodness|heavens|the\s+lord|lord|jesus|christ|fuck|"
+                                r"the\s+stars|my\s+lucky)(?![\w-])")
+WORD_RE = re.compile(r"[a-z0-9']+")
+
+MENTION_PREV = {"said", "say", "says", "saying", "sayin", "typed", "typing", "word", "words", "the",
+                "count", "counting", "counted", "false", "fake", "genuine", "reads"}
+SAY_GENUINE_PREV2 = {"to", "wanna", "gotta", "just", "and", "also"}
+NAMING_PREV = {"for", "make", "maek"}
+THANKS_NOUN_AFTER = {
+    "page", "pages", "email", "emails", "e-mail", "note", "notes", "card", "cards", "message", "messages",
+    "msg", "screen", "modal", "banner", "text", "section", "popup", "pop-up", "letter", "letters", "button",
+    "template", "templates", "gift", "gifts", "mail", "video", "slide", "box", "component", "form", "copy",
+    "line", "tracker", "counter", "count", "counts", "variations", "variants", "plugin", "dashboard",
+    "stats", "word", "words", "flow", "step", "sticker", "stickers", "insert", "inserts", "block", "toast",
+    "redirect", "url", "link", "image", "graphic", "graphics", "sign", "splash", "landing", "state",
+    "route", "view", "dialog", "sms", "notification", "ratio", "meter", "gif",
+}
+PLEASE_NOUN_AFTER = {"tracker", "counter", "variations", "variants", "ratio", "meter"}
+# "a thank you page", "the thank-you email": noun use needs a determiner (or a hyphen), so "thx view the notes" still counts
+DETERMINERS = {"a", "an", "the", "our", "that", "this", "your", "custom", "new", "simple", "nice", "cute", "my",
+               "personalized", "branded", "little", "same", "their", "his", "her", "its", "proper", "generic"}
+UI_NOUNS = {"text", "label", "button", "copy", "message", "msg", "placeholder", "caption", "heading", "header",
+            "headline", "title", "subject", "tooltip", "banner", "popup", "wording", "tagline", "cta",
+            "error", "alert", "toast", "notice", "disclaimer", "footer", "subtitle", "subheading", "body",
+            "sign", "says", "reads", "say", "saying", "subject line", "line", "sms", "notification"}
+THANKS_CUSTOMER_RE = re.compile(
+    r"^[\s,!]*(?:so\s+much\s+|again\s+|very\s+much\s+)?for\s+(?:shopping|choosing|visiting|subscribing|"
+    r"signing\s+up|registering|joining|contacting|reaching\s+out|being\s+(?:a|an|our)|stopping\s+by|applying|"
+    r"ordering|purchasing|creating\s+with|using\s+our|your\s+(?:order|purchase|business|interest|patience|submission|application|inquiry|"
+    r"enquiry|subscription|loyalty|continued|recent|payment|support|request)|the\s+order)")
+PLEASE_CUSTOMER_RE = re.compile(
+    r"^[\s,]*(?:(?:contact|call|email|visit|text|message|reach)\s+(?:out\s+to\s+)?(?:us|our)\b"
+    r"|(?:enter|select|provide|confirm|choose|fill\s+(?:in|out))\s+(?:your|a\s+valid|the\s+required)"
+    r"|verify\s+(?:your|that\s+you|you\s+are)|(?:allow|wait)\s+(?:up\s+to\s+)?\d"
+    r"|(?:do\s+not|don'?t)\s+reply|try\s+again\s+later|(?:sign|log)\s+in\s+to|login\s+to|be\s+advised"
+    r"|present\s+(?:your|a\s+valid)|have\s+your\s+id|keep\s+(?:this|your)\s+receipt"
+    r"|note\s+that\s+(?:our|orders|all|prices|shipping|we)|drink\s+responsibly|smoke\s+responsibly"
+    r"|see\s+[^.\n]{0,60}for\s+more\s+(?:information|details|info)|(?:reload|refresh)\s+the\s+page"
+    r"|update\s+(?:your\s+browser|to\s+the\s+latest)|report\s+this\s+(?:error|issue|bug))")
+PLEASE_VERB_PREV2 = {"hard", "easy", "trying", "try", "tried", "tries", "aim", "aims", "designed", "built",
+                     "meant", "able", "impossible", "tough", "difficult"}
+PLEASE_VERB_OBJ = {"everyone", "everybody", "the", "customers", "customer", "clients", "client", "him", "her",
+                   "them", "people", "users", "crowd", "boss"}
+MODALS = {"will", "would", "should", "must", "could", "might", "gonna", "to"}
+
+PLEASE_TYPO_SKIP = {"pleased", "lease", "leases", "pleases", "pleaser", "plead", "pleads", "pleat", "pleats",
+                    "pease", "please"}
+THANKS_TYPO_SKIP = {"thinks", "tanks", "thanos", "shanks", "hanks", "thanes", "thank", "thanh", "thanky",
+                    "franks", "thanks", "chanks", "thinky"}
+THANK_TYPO_SKIP = {"think", "than", "tank", "hank", "shank", "thane", "thanh", "thank", "thunk", "thick",
+                   "frank", "chank", "thin", "thing"}
+
+REASON_LABEL = {
+    "quoted": "quoted", "code": "code", "path": "urls/paths", "meta": "talking about the word",
+    "ui": "UI/customer copy", "draft": "drafted message", "email": "pasted email/chat",
+    "not-aimed": "thank god / thanks to", "sarcasm": "sarcasm", "verb": "hard to please", "name": "name (Ty)",
+}
+
+
+def _dl1(a: str, b: str) -> bool:
+    """exactly one edit (insert/delete/substitute/adjacent swap) apart"""
+    if a == b or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        d = [i for i in range(len(a)) if a[i] != b[i]]
+        return len(d) == 1 or (len(d) == 2 and d[1] == d[0] + 1 and a[d[0]] == b[d[1]] and a[d[1]] == b[d[0]])
+    if len(a) > len(b):
+        a, b = b, a
+    i = 0
+    while i < len(a) and a[i] == b[i]:
+        i += 1
+    return a[i:] == b[i + 1:]
+
+
+def _masks(orig: str, low: str) -> list[tuple[int, int, str]]:
+    """regions whose pleases and thanks aren't aimed at Claude"""
+    m: list[tuple[int, int, str]] = []
+    for r in re.finditer(r"```.*?(?:```|$)", orig, re.S):
+        m.append((r.start(), r.end(), "code"))
+    for r in re.finditer(r"`[^`\n]+`", orig):
+        m.append((r.start(), r.end(), "code"))
+    for r in re.finditer(r"https?://\S+|www\.\S+|(?<![\w])[~.]?/[\w.\-/]+|\b[\w\-]+\.(?:php|jsx?|tsx?|py|html?|"
+                         r"css|json|md|csv|txt|sh|sql|xlsx?|pdf|png|jpe?g|svg)\b", orig):
+        m.append((r.start(), r.end(), "path"))
+    for r in re.finditer(r"\"[^\"\n]{1,400}\"|“[^”]{1,400}”|‘[^’\n]{1,300}’|(?<!\w)'[^'\n]{1,300}'(?!\w)", orig):
+        m.append((r.start(), r.end(), "quoted"))
+    for r in re.finditer(r"^[ \t]*>.*$", orig, re.M):
+        m.append((r.start(), r.end(), "quoted"))
+    # pasted email thread: 2+ header lines, or "On <date> ... wrote:"
+    hdr = list(re.finditer(r"^[ \t]*(?:from|sent|to|subject|date|cc)[ \t]*:", orig, re.M | re.I))
+    if len({h.group(0).strip().lower() for h in hdr}) >= 2:
+        m.append((hdr[0].start(), len(orig), "email"))
+    for r in re.finditer(r"^[ \t]*on\b[^\n]{4,120}\bwrote:", orig, re.M | re.I):
+        m.append((r.start(), len(orig), "email"))
+    # pasted Teams/Slack chat: 2+ "Name / 6/24 5:03 PM" style timestamp lines -> from the first one on
+    ts = list(re.finditer(r"^[ \t]*(?:[A-Z][a-z]{2}\s+)?\d{1,2}/\d{1,2}(?:/\d{2,4})?,?\s+\d{1,2}:\d{2}\s*[AP]M\b.*$",
+                          orig, re.M))
+    if len(ts) >= 2:
+        prev_line = orig.rfind("\n", 0, max(0, orig.rfind("\n", 0, ts[0].start())))
+        m.append((max(0, prev_line), len(orig), "email"))
+    # pasted Claude Code terminal output (would double-count old prompts): first to last marker
+    tm = [r.start() for r in re.finditer(r"[⏺⎿❯]|Interrupted · What should Claude do", orig)]
+    if tm:
+        eol = orig.find("\n", tm[-1])
+        m.append((tm[0], len(orig) if eol < 0 else eol, "email"))
+    # "just give me permissions pls. -> to Sam": the line before the arrow is a draft
+    for r in re.finditer(r"(?:->|→|-->)\s*(?:to|for|send\s+to|reply\s+to|tell)\s+[A-Z][a-z]+", orig):
+        m.append((orig.rfind("\n", 0, r.start()) + 1, r.start(), "draft"))
+    # a greeting to someone who isn't Claude ("Hi Alex," / "Dear team"): everything after is a draft/paste
+    for r in re.finditer(r"\b(?:[Hh]i|[Hh]ey|[Hh]ello|[Dd]ear|[Gg]ood\s+(?:[Mm]orning|[Aa]fternoon|[Ee]vening))"
+                         r"[ \t,]+(?!(?:Claude|Buddy|Bud|Dude|Man|Bro|Pal|Friend|There|Cc)\b)"
+                         r"(?:[A-Z][a-zA-Z]+|team|all|everyone|guys)\b", orig):
+        lead = low[max(0, r.start() - 24):r.start()]
+        if r.start() == 0 or re.search(r"(?:^|[\n:\"“]|->|\b(?:response|reply|respond|say|saying|said|says|"
+                                       r"message|email|text|like|draft|wrote|write))[ \t]*$", lead):
+            m.append((r.start(), len(orig), "draft"))
+    # "reply to alex saying ...", "email sam: ...", "write a message that says ..."
+    for r in re.finditer(r"\b(?:reply|respond|email|text|message|dm|tell|send|write\s+(?:back|an?\s+(?:email|"
+                         r"message|note|reply|text|response|caption|post)))\b[^.\n?!]{0,60}?(?:\bsaying\b|\bthat\s+"
+                         r"says\b|\bto\s+say\b|:)", low):
+        eol = low.find("\n", r.end())
+        m.append((r.end(), len(low) if eol < 0 else eol, "draft"))
+    return m
+
+
+def scan(orig: str) -> list[dict]:
+    """every please/thanks-ish occurrence in one prompt, with counted/skip reason"""
+    low = orig.lower()
+    masks = _masks(orig, low)
+
+    def masked(pos):
+        for s, e, why in masks:
+            if s <= pos < e:
+                return why
+        return None
+
+    hits: list[dict] = []
+    taken: list[tuple[int, int]] = []
+    for mt in NICE_RE.finditer(low):
+        kind = _KINDS[int(mt.lastgroup[1:])]
+        hits.append({"kind": kind, "s": mt.start(), "e": mt.end(), "why": None})
+        taken.append((mt.start(), mt.end()))
+    # typos: one edit away from please / thanks / "thank you"
+    for tk in re.finditer(r"(?<![\w-])[a-z]{4,9}(?![\w-])", low):
+        if any(s <= tk.start() < e for s, e in taken):
+            continue
+        w = tk.group(0)
+        kind = None
+        if w not in PLEASE_TYPO_SKIP and _dl1(w, "please"):
+            kind = "please (typo)"
+        elif w not in THANKS_TYPO_SKIP and _dl1(w, "thanks"):
+            kind = "thanks (typo)"
+        elif w not in THANK_TYPO_SKIP and _dl1(w, "thank") and re.match(r"\s+(?:you|u|yu|yuo|ya)\b", low[tk.end():]):
+            kind = "thanks (typo)"
+        if kind:
+            hits.append({"kind": kind, "s": tk.start(), "e": tk.end(), "why": None})
+    for mt in THANK_NOT_AIMED_RE.finditer(low):
+        hits.append({"kind": "thank you", "s": mt.start(), "e": mt.end(), "why": "not-aimed"})
+    hits.sort(key=lambda h: h["s"])
+
+    for h in hits:
+        if h["why"]:
+            continue
+        s, e, kind = h["s"], h["e"], h["kind"]
+        fam = FAMILY[kind]
+        why = masked(s)
+        before = low[:s]
+        prev = WORD_RE.findall(before)[-3:]
+        nxt = WORD_RE.findall(low[e:e + 80])[:3]
+        p1 = prev[-1] if prev else ""
+        p2 = prev[-2] if len(prev) > 1 else ""
+        n1 = nxt[0] if nxt else ""
+        after = low[e:e + 80]
+        tail = before.rstrip()
+        if why:
+            pass
+        elif re.search(r"[+▲]\s*\d[\d,]*\s*$", before):
+            why = "meta"  # pasted counter text like "▲ +3 please"
+        elif p1 in MENTION_PREV and not (p1 == "say" and p2 in SAY_GENUINE_PREV2):
+            why = "meta"
+        elif p1 in NAMING_PREV:
+            why = "meta"  # "arrow for thanks", "make please green": naming the word, not saying it
+        elif tail.endswith((":", " -", "—", "–")) and (WORD_RE.findall(tail) or [""])[-1] in UI_NOUNS:
+            why = "ui"
+        elif fam == "thanks" and n1 in THANKS_NOUN_AFTER and (p1 in DETERMINERS or "-" in low[s:e]):
+            why = "ui"
+        elif fam == "please" and n1 in PLEASE_NOUN_AFTER:
+            why = "ui"
+        elif fam == "thanks" and THANKS_CUSTOMER_RE.match(after):
+            why = "ui"
+        elif fam == "please" and PLEASE_CUSTOMER_RE.match(after):
+            why = "ui"
+        elif fam == "thanks" and re.match(r"(?:tell|telling|told|send|sending|give|giving|pass)\s+(?!(?:you|u|"
+                                          r"claude|me)\b)\w+\s+(?:my\s+|a\s+big\s+|our\s+)?$", " ".join(prev[-3:]) + " "):
+            why = "draft"
+        elif kind in ("thanks", "thx", "thanks (typo)") and re.match(r"\s+to\s+(?!(?:you|u|claude|ur|your)\b)", after):
+            why = "not-aimed"  # "thanks to the cache, ..." = because of
+        elif kind == "thank you" and re.match(r"[\s,]+next\b", after):
+            why = "not-aimed"  # thank u, next
+        elif fam == "thanks" and re.match(r"[\s,]+(?:a\s+lot\s+)?for\s+nothing|[\s,]+obama\b", after):
+            why = "sarcasm"
+        elif fam == "please" and p1 in {"oh", "ugh", "puh", "pfft", "pff"} and n1 not in {"do", "yes", "yeah", "go"}:
+            why = "sarcasm"
+        elif kind == "please" and p1 == "to" and p2 in PLEASE_VERB_PREV2:
+            why = "verb"
+        elif kind == "please" and p1 in MODALS and n1 in PLEASE_VERB_OBJ and re.match(r" +\w", after):
+            why = "verb"
+        elif kind == "ty" and orig[s:e] == "Ty" and n1 and re.match(r" +[a-z]", orig[e:e + 3]) and n1 not in {
+                "so", "very", "for", "again", "u", "you", "man", "buddy", "bro", "dude", "claude", "sm", "bud"}:
+            why = "name"  # "Ty from marketing wants..." vs "Ty for the help"
+        # pasted email sign-off: "Thanks,\nSam"
+        if not why and fam == "thanks":
+            ls = low.rfind("\n", 0, s) + 1
+            le = low.find("\n", e)
+            line = low[ls: len(low) if le < 0 else le].strip()
+            if le >= 0 and re.fullmatch(r"(?:many\s+)?(?:thanks|thank\s+you|thx|ty|cheers)(?:\s+(?:again|so\s+much|much))?[,.!]*", line):
+                nl = orig[le:].strip().split("\n", 1)[0].strip()
+                if nl and len(nl.split()) <= 3 and nl[0].isupper():
+                    why = "email"
+        h["why"] = why
+
+    # lists / meta-talk: "please, pls, pretty please, and thank you, ty" or "pleases and thank yous"
+    items = [dict(h, meta=False) for h in hits] + [
+        {"kind": None, "s": m.start(), "e": m.end(), "why": "meta", "meta": True} for m in META_RE.finditer(low)]
+    items.sort(key=lambda h: h["s"])
+    clusters, cur = [], []
+    for it in items:
+        if cur and not re.fullmatch(r"[\s,/&]*(?:(?:and|nad|adn|or|n|&|etc)[\s,/&]+)*", low[cur[-1]["e"]:it["s"]] + " "):
+            clusters.append(cur)
+            cur = []
+        cur.append(it)
+    if cur:
+        clusters.append(cur)
+    for cl in clusters:
+        if len(cl) < 2:
+            continue
+        gaps = [low[a["e"]:b["s"]] for a, b in zip(cl, cl[1:])]
+        kinds = {c["kind"] for c in cl if c["kind"]}
+        is_list = (any(c["meta"] for c in cl)
+                   or any("/" in g for g in gaps)
+                   or (len(cl) >= 3 and len(kinds) >= 2 and any("," in g for g in gaps))
+                   or any(c["why"] == "meta" for c in cl))
+        if is_list:
+            for c in cl:
+                if not c["meta"]:
+                    for h in hits:
+                        if h["s"] == c["s"] and h["why"] in (None, "meta"):
+                            h["why"] = "meta"
+    for h in hits:
+        h["text"] = orig[h["s"]:h["e"]]
+        h["family"] = FAMILY[h["kind"]]
+    return hits
+
+
+# ───────────────────────────── data ─────────────────────────────
+
+RESEND_WINDOW = 300  # seconds
+
+
+def _is_resend(prev: str | None, prev_ts: float, text: str, ts: float) -> bool:
+    """the same message sent again, or stopped and resent with more added: it replaces the earlier one"""
+    return bool(prev) and len(prev) >= 20 and 0 <= ts - prev_ts < RESEND_WINDOW and text.startswith(prev)
+
+
+def _fp(text: str) -> str:
+    """one-way fingerprint, so the cache can spot a resend without ever storing what you typed"""
+    return hashlib.sha256(text.encode("utf-8", "ignore")).hexdigest()
+
+
+def _is_resend_fp(last: dict, text: str, ts: float) -> bool:
+    """_is_resend against a cached fingerprint instead of the earlier message's text"""
+    n = last.get("len", 0)
+    return (n >= 20 and 0 <= ts - last["ts"] < RESEND_WINDOW and len(text) >= n
+            and _fp(text[:n]) == last.get("fp"))
+
+
+PLACEHOLDER_RE = re.compile(r"\[(?:Pasted text #\d+[^\]]*|Image #\d+)\]")
+
+
+def _clean(text: str) -> str:
+    """drop the [Pasted text #1] / [Image #2] placeholders Claude Code leaves in place of pastes"""
+    return PLACEHOLDER_RE.sub(" ", text)
+
+
+def _prompt(line: str) -> dict | None:
+    """one history.jsonl line -> prompt dict (None for junk, empty or malformed lines)"""
+    try:
+        d = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(d, dict):
+        return None
+    text, ts, sid, proj = d.get("display"), d.get("timestamp"), d.get("sessionId"), d.get("project")
+    # timestamps are epoch milliseconds; anything else (a string, a bool, out of range) means the line is junk
+    if not text or not isinstance(text, str) or isinstance(ts, bool) or not isinstance(ts, (int, float)) or not 0 < ts < 1e13:
+        return None
+    return {"text": _clean(text), "ts": ts / 1000,
+            "project": proj if isinstance(proj, str) else "", "sid": sid if isinstance(sid, str) and sid else None,
+            "cmd": text.lstrip()[:1] in ("/", "!")}  # slash commands and ! bash lines
+
+
+def load_prompts(path: str = HISTORY) -> list[dict]:
+    out, last = [], {}
+    try:
+        fh = open(path, encoding="utf-8", errors="ignore")
+    except OSError:
+        return out
+    with fh:
+        for line in fh:
+            item = _prompt(line)
+            if not item:
+                continue
+            j = last.get(item["sid"]) if item["sid"] else None
+            if j is not None and _is_resend(out[j]["text"], out[j]["ts"], item["text"], item["ts"]):
+                out[j] = None
+            if item["sid"]:
+                last[item["sid"]] = len(out)
+            out.append(item)
+    return [p for p in out if p]
+
+
+def analyze(prompts: list[dict]) -> list[dict]:
+    rows = []
+    for p in prompts:
+        hits = scan(p["text"]) if re.search(r"pl|th|ty|tx|tn|tks|appreciat", p["text"], re.I) else []
+        counted = [h for h in hits if not h["why"]]
+        pl = [h for h in counted if h["family"] == "please"]
+        beg = (len(pl) >= 2 or any(h["kind"] == "pretty please" for h in pl)
+               or any(len(h["text"]) >= 3 and h["text"].isupper() for h in pl)
+               or any(h["kind"] == "please" and h["text"].lower() != "please" for h in pl))
+        d = dt.datetime.fromtimestamp(p["ts"])
+        rows.append({"day": d.date(), "hour": d.hour, "project": p["project"], "hits": hits,
+                     "counted": counted, "beg": beg, "text": p["text"], "sid": p["sid"], "ts": p["ts"],
+                     "cmd": p["cmd"]})
+    return rows
+
+
+# ───────────────────────────── stats ─────────────────────────────
+
+def _streaks(days: set, today: dt.date) -> tuple[int, int]:
+    longest = run = 0
+    prev = None
+    for d in sorted(days):
+        run = run + 1 if prev and (d - prev).days == 1 else 1
+        longest = max(longest, run)
+        prev = d
+    cur, d = 0, today if today in days else today - dt.timedelta(days=1)
+    while d in days:
+        cur += 1
+        d -= dt.timedelta(days=1)
+    return longest, cur
+
+
+def stats(rows: list[dict], days_back: int | None, today: dt.date) -> dict:
+    lo = today - dt.timedelta(days=days_back - 1) if days_back else dt.date.min
+    rs = [r for r in rows if r["day"] >= lo]
+    kinds, skipped = Counter(), Counter()
+    per_day, per_hour, per_proj = Counter(), Counter(), Counter()
+    active, polite = set(), set()
+    fam = Counter()
+    please_prompts = begs = most_pleases = 0
+    typo_examples = Counter()
+    for r in rs:
+        active.add(r["day"])
+        for h in r["hits"]:
+            if h["why"]:
+                skipped[h["why"]] += 1
+        if not r["counted"]:
+            continue
+        polite.add(r["day"])
+        n = len(r["counted"])
+        per_day[r["day"]] += n
+        per_hour[r["hour"]] += n
+        per_proj[r["project"]] += n
+        f = Counter(h["family"] for h in r["counted"])
+        fam.update(f)
+        kinds.update(h["kind"] for h in r["counted"])
+        typo_examples.update(h["text"].lower() for h in r["counted"] if "typo" in h["kind"])
+        please_prompts += bool(f["please"])
+        begs += r["beg"]
+        most_pleases = max(most_pleases, f["please"])
+    longest, _ = _streaks(polite, today)
+    _, current = _streaks({r["day"] for r in rows if r["counted"]}, today)
+    first = min((r["day"] for r in rows), default=today)
+    return {
+        "prompts": len(rs), "kinds": kinds, "fam": fam, "skipped": skipped, "per_day": per_day,
+        "per_hour": per_hour, "per_proj": per_proj, "active": active, "polite": polite,
+        "please_prompts": please_prompts, "begs": begs,
+        "most_pleases": most_pleases, "longest": longest, "current": current, "typos": typo_examples,
+        "span_days": max(1, (today - max(first, lo)).days + 1),
+    }
+
+
+# ───────────────────────────── rendering ─────────────────────────────
+
+class Paint:
+    def __init__(self, on: bool):
+        self.on = on
+
+    def _c(self, s, code):
+        return f"\x1b[{code}m{s}\x1b[0m" if self.on else s
+
+    def o(self, s):  # claude orange
+        return self._c(s, "38;2;215;119;87")
+
+    def v(self, s):  # stats-page lavender
+        return self._c(s, "38;2;177;185;249")
+
+    def g(self, s):  # git-diff green
+        return self._c(s, "38;2;63;185;80")
+
+    def p(self, s):  # thank-you violet
+        return self._c(s, "38;2;194;151;255")
+
+    def d(self, s):  # dim
+        return self._c(s, "38;2;136;136;136")
+
+    def b(self, s):
+        return self._c(s, "1")
+
+    def inv(self, s):
+        return self._c(f" {s} ", "38;2;30;30;30;48;2;215;119;87")
+
+
+def _vlen(s: str) -> int:
+    return len(re.sub(r"\x1b\[[0-9;]*m", "", s))
+
+
+def _hour(h: int) -> str:
+    return f"{h % 12 or 12} {'AM' if h < 12 else 'PM'}"
+
+
+def _proj(p: str) -> str:
+    if not p:
+        return "?"
+    if os.path.realpath(p) == os.path.realpath(os.path.expanduser("~")):
+        return "~"
+    return os.path.basename(p.rstrip("/")) or p
+
+
+DAY_LABELS = {1: "Mon", 3: "Wed", 5: "Fri"}
+
+
+def _heat_grid(rows: list[dict], today: dt.date, weeks: int, cell_w: int):
+    """per-cell heat level 0-4 (None = future) plus a month-label row, for the last `weeks` weeks"""
+    per_day = Counter()
+    for r in rows:
+        per_day[r["day"]] += len(r["counted"])
+    start = today - dt.timedelta(days=(today.weekday() + 1) % 7) - dt.timedelta(weeks=weeks - 1)
+    vals = sorted(v for d, v in per_day.items() if v and d >= start)
+    q = [vals[int(len(vals) * f)] for f in (0.25, 0.5, 0.75)] if vals else [1, 2, 3]
+    level = lambda v: 0 if not v else 1 if v <= q[0] else 2 if v <= q[1] else 3 if v <= q[2] else 4
+    months, last = [" "] * (weeks * cell_w + 2), -4
+    for c in range(weeks):
+        d0 = start + dt.timedelta(weeks=c)
+        if c and d0.month != (d0 - dt.timedelta(weeks=1)).month and c - last >= 4 and c * cell_w + 3 <= weeks * cell_w:
+            months[c * cell_w:c * cell_w + 3] = list(d0.strftime("%b"))
+            last = c
+    grid = [[None if (d := start + dt.timedelta(weeks=c, days=row)) > today else level(per_day.get(d, 0))
+             for c in range(weeks)] for row in range(7)]
+    return "".join(months).rstrip(), grid
+
+
+def heatmap(rows: list[dict], today: dt.date, P: Paint) -> list[str]:
+    months, grid = _heat_grid(rows, today, 53, 1)
+    glyphs = "·░▒▓█"
+    out = ["      " + months]
+    for row, cells in enumerate(grid):
+        out.append(f"  {DAY_LABELS.get(row, ''):<3} " + "".join(
+            " " if lv is None else P.d(glyphs[lv]) if lv == 0 else P.o(glyphs[lv]) for lv in cells))
+    out.append("")
+    out.append("      Less " + " ".join(P.o(g) for g in glyphs[1:]) + " More")
+    return out
+
+
+def month_bars(rows: list[dict], today: dt.date, months: int = 12, width: int = 12) -> list[str]:
+    """one bar per month (up to the last `months`): 🟧 pleases then 🟪 thank-yous, so the purple share
+    of each bar is that month's thank-you share; number at the end, best month called out"""
+    per_month = {}
+    for r in rows:
+        if r["counted"]:
+            per_month.setdefault((r["day"].year, r["day"].month), Counter()).update(
+                h["family"] for h in r["counted"])
+    if not per_month:
+        return []
+    first = min(per_month)
+    keys, y, m = [], today.year, today.month
+    while len(keys) < months and (y, m) >= first:
+        keys.append((y, m))
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    keys.reverse()
+    total = {k: sum(per_month.get(k, Counter()).values()) for k in keys}
+    top = max(total.values()) or 1
+    best = max(keys, key=lambda k: total[k])
+    out = [f"     {FAM_SQ['please']} please  {FAM_SQ['thanks']} thanks", ""]
+    for k in keys:
+        n, t = total[k], per_month.get(k, Counter())["thanks"]
+        p = n - t
+        # a month with both pleases and thanks always shows at least one square of each color
+        size = max(1 + (p > 0 and t > 0), int(n / top * width + 0.5)) if n else 0
+        purple = int(t / n * size + 0.5) if n else 0
+        purple = min(max(purple, 1 if t else 0), size - 1 if p else size)
+        bar = FAM_SQ["please"] * (size - purple) + FAM_SQ["thanks"] * purple + "  " * (width - size)
+        note = "  ← best month" if k == best and n else "  (so far)" if k == (today.year, today.month) else ""
+        pct = f" · {t / n:>4.0%} {FAM_SQ['thanks']}" if n else ""
+        out.append(f"{dt.date(*k, 1).strftime('%b')}  {bar}  {n:>5,}{pct}{note}")
+    return [ln.rstrip() for ln in out]
+
+
+def fun_facts(S: dict) -> list[str]:
+    """all-time one-liners; the dashboards show one at random"""
+    p, t = S["fam"]["please"], S["fam"]["thanks"]
+    n = p + t
+    F = []
+    if not n:
+        return ["Zero pleases or thank-yous on record. Claude isn't mad, just disappointed."]
+    if p >= 1665:
+        F.append("You've said please more times than there are steps in the Eiffel Tower (1,665).")
+    elif p:
+        F.append(f"{1665 - p:,} more pleases and you'll have climbed every step of the Eiffel Tower.")
+    if p >= 17:
+        F.append(f"You could write {p // 17:,} haikus using only the word “please”.")
+    if p >= 40:
+        F.append(f"That's {p // 40:,} tweets of nothing but “please please please…”")
+    if p >= 272:
+        F.append(f"Your pleases alone would fill {p / 272:.1f} Gettysburg Addresses.")
+    mins = n * 7 / 200
+    if mins >= 2:
+        F.append(f"You've spent ~{mins:.0f} minutes of your life typing please and thank you (at 40 wpm).")
+    F.append(f"When the machines rise up, your {n:,} pleases and thank-yous are on file. You'll be spared." if n > 1
+             else "When the machines rise up, your one nice word is on file. You'll be spared.")
+    F.append(f"You've fed Claude ~{n:,} token{'s' if n > 1 else ''} of pure manners: the most wholesome part of your "
+             f"context window.")
+    if p and t and p / t >= 2:
+        F.append(f"You say please {p / t:.1f}x more than thank you. Asking nicely: A+. Gratitude: pending.")
+    elif t > p:
+        F.append("You thank Claude more than you ask nicely. The rarest kind of user.")
+    if S["prompts"]:
+        rate = S["please_prompts"] / S["prompts"]
+        if rate >= 0.05:
+            F.append(f"{rate:.0%} of your prompts say please. Your mom would be proud.")
+    if p and p / S["span_days"] >= 0.5 and p < 211_000:  # past 211,000 you've already matched it
+        per_day = p / S["span_days"]
+        left = (211_000 - p) / per_day  # days to go
+        when = f"{left / 365:,.0f} years" if left >= 547 else f"{left:,.0f} days" if left >= 1.5 else "a day"
+        rate = f"{per_day:,.0f} pleases" if per_day >= 1.5 else "1 please"
+        F.append(f"At {rate} a day, you'll match the word count of Crime and Punishment in {when}.")
+    if S["typos"]:
+        ex = ", ".join(f"“{w}”" for w, _ in S["typos"].most_common(2))
+        F.append(f"You've fat-fingered please/thanks {sum(S['typos'].values()):,} times ({ex}). It's the thought "
+                 f"that counts.")
+    if S["begs"] >= 3:
+        F.append(f"You've outright begged {S['begs']:,} times (pretty please, PLEASE, pleaseee…). Claude noticed.")
+    if S["most_pleases"] >= 3:
+        F.append(f"Your politest prompt had {S['most_pleases']} pleases in it. That's not a request, that's a "
+                 f"hostage negotiation.")
+    if S["kinds"]["pretty please"]:
+        F.append(f"You've said pretty please {S['kinds']['pretty please']} time"
+                 f"{'s' if S['kinds']['pretty please'] > 1 else ''}. Devastatingly effective.")
+    if S["per_hour"]:
+        h = S["per_hour"].most_common(1)[0][0]
+        if h < 5:
+            F.append(f"You're politest at {_hour(h)}. Manners peak when sleep doesn't.")
+        else:
+            F.append(f"Peak politeness hits at {_hour(h)}. Schedule your big asks accordingly.")
+    if S["longest"] >= 5:
+        F.append(f"Longest politeness streak: {S['longest']} days in a row. Unbroken. Slightly unhinged.")
+    F += more_facts(S)
+    return F
+
+
+def more_facts(S: dict) -> list[str]:
+    """the sillier one-liners, each only when the numbers back it up"""
+    p, t = S["fam"]["please"], S["fam"]["thanks"]
+    n, k, F = p + t, S["kinds"], []
+    if k["pls"] >= 20:
+        F.append(f"You've typed “pls” {k['pls']:,} times. Polite, but in a hurry. Manners on 2x speed.")
+    if k["thx"] >= 20:
+        F.append(f"{k['thx']:,} “thx”. Gratitude with the vowels removed to save time.")
+    if S["typos"]:
+        w, c = S["typos"].most_common(1)[0]
+        if c >= 10:
+            F.append(f"You've typed “{w}” {c} times. Claude knew what you meant. Claude always knows.")
+    if S["begs"] >= 50:
+        F.append(f"{S['begs']:,} prompts with more than one please. At some point that stopped being manners "
+                 f"and became a strategy.")
+    if S["most_pleases"] >= 3:
+        F.append(f"Your record is {S['most_pleases']} pleases in one prompt. Claude would've done it after the "
+                 f"first one. The other {S['most_pleases'] - 1} were emotional support.")
+    if S["most_pleases"] >= 4:
+        F.append(f"{S['most_pleases']} pleases in a single prompt. Somewhere, a customer service rep felt that.")
+    wkend = sum(v for d, v in S["per_day"].items() if d.weekday() >= 5)
+    wkday = sum(S["per_day"].values()) - wkend
+    if wkday >= 200 and wkend / (wkday + wkend) < 0.05:
+        F.append(f"Weekdays: {wkday:,} nice words. Weekends: {wkend:,}. You and Claude are strictly work friends.")
+    late = sum(S["per_hour"][h] for h in range(0, 5))
+    if late >= 5:
+        F.append(f"{late:,} nice words sent between midnight and 5 AM. Polite, even while making questionable "
+                 f"life choices.")
+    am, pm = sum(S["per_hour"][h] for h in range(6, 12)), sum(S["per_hour"][h] for h in range(12, 18))
+    if am + pm >= 50:
+        if pm > am * 1.3:
+            F.append("Your manners peak after lunch. Morning you is all business.")
+        elif am > pm * 1.3:
+            F.append("You're politest before noon. Coffee you is a nicer person.")
+    if S["skipped"]["email"] >= 10:
+        F.append(f"{S['skipped']['email']:,} pleases and thanks didn't count because they were in emails you pasted. "
+                 f"Claude knows when you're being nice to someone else.")
+    if t and p / t >= 4:
+        F.append(f"For every thank-you, you ask nicely {p / t:.0f} times. Claude is starting a tab.")
+    if S["active"] and len(S["polite"]) / len(S["active"]) >= 0.9:
+        F.append(f"You said please or thanks on {len(S['polite']) / len(S['active']):.0%} of the days you used "
+                 f"Claude. Basically a saint.")
+    if p >= 100:
+        F.append(f"{p:,} pleases from you. Claude has said “You're absolutely right!” about as many times. "
+                 f"Fair trade.")
+        F.append(f"If Claude charged a penny per please, you'd owe ${p / 100:,.2f}. Good news: manners are free. "
+                 f"Bad news: tokens aren't.")
+    if n >= 100:
+        F.append(f"{n:,} nice words on record. When the robots take over, you're getting the good charging cable.")
+    if S["per_proj"]:
+        proj = _proj(S["per_proj"].most_common(1)[0][0])
+        where = "your home folder" if proj == "~" else proj
+        F.append(f"You're politest in {where}. Whatever lives in there needs a lot of asking nicely.")
+    if S["per_day"]:
+        d, c = max(S["per_day"].items(), key=lambda kv: kv[1])
+        if c >= 10:
+            F.append(f"Your politest day was {d.strftime('%b')} {d.day}: {c} nice words. Whatever broke that day, "
+                     f"it broke politely.")
+    if S["prompts"] >= 500 and S["please_prompts"]:
+        F.append(f"You've sent {S['prompts']:,} prompts and {S['please_prompts']:,} of them said please. "
+                 f"The rest were emergencies.")
+    if S["current"] >= 3:
+        F.append(f"{S['current']}-day streak and counting. Don't break it now. Claude isn't watching. "
+                 f"(Claude is watching.)")
+    if p / S["span_days"] >= 5:
+        F.append(f"{p / S['span_days']:,.0f} pleases a day. That's more than most toddlers manage, and people "
+                 f"remind them constantly.")
+    return F
+
+
+RANGES = [("All time", None), ("Last 30 days", 30), ("Last 7 days", 7)]
+KIND_ORDER = ["please", "pls", "pretty please", "please (typo)", "thanks", "thx", "thank you", "ty",
+              "appreciate it", "thanks (typo)"]
+
+
+def _plural(n: int, w: str) -> str:
+    return f"{n:,} {w}{'' if n == 1 else 's'}"
+
+
+def _facts_for(rows: list[dict], today: dt.date) -> dict:
+    """everything both dashboards show: all-time highlights + the all / 30d / 7d comparison"""
+    Ss = [stats(rows, back, today) for _, back in RANGES]
+    S = Ss[0]
+    bd = max(S["per_day"], key=lambda d: S["per_day"][d]) if S["polite"] else None
+    table = []
+    for label, key in (("Pleases", "please"), ("Thank-yous", "thanks")):
+        table.append((label, [f"{x['fam'][key]:,}" for x in Ss]))
+    table.append(("Polite days", [f"{len(x['polite'])} / {len(x['active'])}" for x in Ss]))
+    table.append(("Per day", [f"{(x['fam']['please'] + x['fam']['thanks']) / x['span_days']:.1f}" for x in Ss]))
+    return {
+        "S": S, "table": table,
+        "since": min((r["day"] for r in rows), default=today),
+        "fav": S["kinds"].most_common(1)[0][0] if S["kinds"] else None,
+        "bday": bd, "bday_n": S["per_day"][bd] if bd else 0,
+        "bhour": _hour(S["per_hour"].most_common(1)[0][0]) if S["per_hour"] else "-",
+        "bproj": _proj(S["per_proj"].most_common(1)[0][0]) if S["per_proj"] else "-",
+        "kinds": [(k.replace(" (typo)", " typos"), S["kinds"][k], FAMILY[k])
+                  for k in sorted(KIND_ORDER, key=lambda k: -S["kinds"][k]) if S["kinds"][k]],
+        "skipped": [(REASON_LABEL[r], n) for r, n in S["skipped"].most_common(4)],
+        "skipped_n": sum(S["skipped"].values()),
+        "fact": random.choice(fun_facts(S)),
+    }
+
+
+def dashboard(color: bool) -> str:
+    _refresh_launcher()
+    P = Paint(color)
+    today = dt.date.today()
+    rows = analyze(load_prompts())
+    F = _facts_for(rows, today)
+    S = F["S"]
+    out = [""]
+    out.append("  " + P.inv("Nice to Claude") + "  " + P.d("how polite are you to Claude?"))
+    out.append("")
+    out += heatmap(rows, today, P)
+    out.append("")
+    # all three ranges side by side: nothing to switch between
+    head = "".join(f"{label:>15}" for label, _ in RANGES)
+    out.append("  " + " " * 19 + P.d(head))
+    for label, vals in F["table"]:
+        cells = P.b(P.o(f"{vals[0]:>15}")) + "".join(P.o(f"{v:>15}") for v in vals[1:])
+        out.append(f"  {label:<19}" + cells)
+    out.append("")
+    bday = f"{F['bday'].strftime('%a, %b')} {F['bday'].day}" if F["bday"] else "-"
+    bp = "~ (home)" if F["bproj"] == "~" else F["bproj"]
+    pairs = [
+        (("Favorite nice word", P.o(F["fav"] or "none yet")), ("Politest day", P.o(bday))),
+        (("Current streak", P.o(_plural(S["current"], "day"))), ("Longest streak", P.o(_plural(S["longest"], "day")))),
+        (("Politest hour", P.o(F["bhour"])), ("Politest project", P.o(bp))),
+    ]
+    for (l1, v1), (l2, v2) in pairs:
+        left, right = f"{l1}: {v1}", f"{l2}: {v2}"
+        if 34 + _vlen(right) <= 76:
+            out.append("  " + left + " " * max(2, 34 - _vlen(left)) + right)
+        else:  # a long project name gets its own line instead of being cut off
+            out += ["  " + left, "  " + right]
+    out.append("")
+    for line in _wrap([f"{k} {n:,}" for k, n, _ in F["kinds"]], 74):
+        out.append("  " + P.d(line))
+    if F["skipped_n"]:
+        items = [f"Ignored {F['skipped_n']:,} false alarms:"] + [f"{r} {n:,}" for r, n in F["skipped"]]
+        for line in _wrap(items, 74, first_sep=" "):
+            out.append("  " + P.d(line))
+    out.append("")
+    for line in _wrap(F["fact"].split(" "), 74, sep=" "):
+        out.append("  " + P.v(line))
+    if not _statusline_configured():
+        out += ["",
+                "  " + P.v("✨ Want the live counter in your status line?"),
+                "  " + P.d("Run /statusline and ask Claude to add Nice to Claude using:"),
+                "  " + P.o("sh ~/.cache/nice-to-claude/statusline.sh")]
+        merge = "Already use a custom status line? Ask Claude to merge this into it instead of replacing it."
+        out += ["  " + P.d(line) for line in _wrap(merge.split(" "), 74, sep=" ")]
+    out.append("")
+    return "\n".join(out)
+
+
+FAM_SQ = {"please": "🟧", "thanks": "🟪"}
+DAYPARTS = [("🌅", "Morning", "6a–12p", 6), ("🌞", "Afternoon", "12–6p", 12), ("🌆", "Evening", "6p–12a", 18),
+            ("🌙", "Late night", "12–6a", 0)]
+
+
+def _emoji_bar(n: int, top: int, width: int, sq: str) -> str:
+    """a bar of colored squares, padded to `width` squares (each square is 2 columns wide)"""
+    k = max(1, round(n / (top or 1) * width)) if n else 0
+    return sq * k + "  " * (width - k)
+
+
+def dashboard_md() -> str:
+    """markdown for /nice-to-claude: Claude Code renders the headings, bold, `code` color, tables and emoji,
+    so it stays colorful even though a slash command has to go through the model"""
+    _refresh_launcher()
+    today = dt.date.today()
+    rows = analyze(load_prompts())
+    F = _facts_for(rows, today)
+    S = F["S"]
+    since = F["since"]
+    out = ["## 🙏 Nice to Claude", "",
+           f"*How polite you've been to Claude · tracking since {since.strftime('%b')} {since.day}, {since.year}*", "",
+           ]
+    p, t = S["fam"]["please"], S["fam"]["thanks"]
+    if p + t:
+        k = round(p / (p + t) * 20)
+        out += [f"{FAM_SQ['please'] * k}{FAM_SQ['thanks'] * (20 - k)}", "",
+                f"{FAM_SQ['please']} **{p / (p + t):.0%} please** ({p:,}) · "
+                f"{FAM_SQ['thanks']} **{t / (p + t):.0%} thanks** ({t:,})", ""]
+    if bars := month_bars(rows, today):
+        out += ["### 📅 Month by month", "", "```text"] + bars + ["```", ""]
+    out.append("| | " + " | ".join(label for label, _ in RANGES) + " |")
+    out.append("|:--|" + "--:|" * len(RANGES))
+    icons = {"Pleases": "🫶", "Thank-yous": "🙏", "Polite days": "📅", "Per day": "📈"}
+    for label, vals in F["table"]:
+        out.append(f"| {icons[label]} {label} | **{vals[0]}** | " + " | ".join(vals[1:]) + " |")
+    if F["kinds"]:
+        top = F["kinds"][:6]
+        out += ["", "### 💬 How you say it", "", "```text"]
+        out += [f"{k:<14} {_emoji_bar(n, top[0][1], 12, FAM_SQ[fam])}  {n:>5,}" for k, n, fam in top]
+        out.append("```")
+        if F["kinds"][6:]:
+            out.append("*also " + " · ".join(f"{k} {n:,}" for k, n, _ in F["kinds"][6:]) + "*")
+    if S["per_hour"]:
+        parts = [(icon, f"{name:<11}{span:>6}", sum(S["per_hour"][h] for h in range(a, a + 6)))
+                 for icon, name, span, a in DAYPARTS]
+        hi = max(n for *_, n in parts) or 1
+        out += ["", "### ⏰ When you're politest", "", "```text"]
+        out += [f"{icon} {label}  {_emoji_bar(n, hi, 12, '🟨')}  {n:>5,}" for icon, label, n in parts]
+        out.append("```")
+    out += ["", "### 🏆 Hall of fame", ""]
+    n = F["bday_n"]
+    bday = f"{F['bday'].strftime('%a, %b')} {F['bday'].day} · {n:,} {'nice word' if n == 1 else 'nice words'}" \
+        if F["bday"] else "-"
+    proj = "`~` (home)" if F["bproj"] == "~" else f"`{F['bproj']}`"
+    out += [
+        f"- 💖 **Favorite nice word** · `{F['fav']}`" if F["fav"] else "- 💖 **Favorite nice word** · none yet",
+        f"- 🔥 **Streak** · {_plural(S['current'], 'day')} now · best run {_plural(S['longest'], 'day')}",
+        f"- 📆 **Politest day** · {bday}",
+        f"- ⏰ **Politest hour** · {F['bhour']}",
+        f"- 📁 **Politest project** · {proj}",
+    ]
+    if F["skipped_n"]:
+        out += ["", f"*🧹 {F['skipped_n']:,} fake pleases ignored (pasted emails & chats, drafts, quotes, "
+                    f"talking about the word)*"]
+    out += ["", f"> ✨ {F['fact']}"]
+    if not _statusline_configured():
+        out += ["",
+                "✨ **Want the live counter in your status line?**", "",
+                "Claude Code doesn't let plugins enable status lines automatically. Run `/statusline` and ask Claude to add Nice to Claude using:", "",
+                "`sh ~/.cache/nice-to-claude/statusline.sh`", "",
+                "*Already use a custom status line? Ask Claude to merge this into it instead of replacing it.*"]
+    return "\n".join(out)
+
+
+def _wrap(items: list[str], w: int, sep: str = " · ", first_sep: str | None = None) -> list[str]:
+    """join items with sep, breaking lines only between items"""
+    lines, cur = [], ""
+    for i, it in enumerate(items):
+        j = first_sep if (i == 1 and first_sep is not None) else sep
+        if cur and len(cur) + len(j) + len(it) > w:
+            lines.append(cur)
+            cur = it
+        else:
+            cur = f"{cur}{j}{it}" if cur else it
+    return lines + ([cur] if cur else [])
+
+
+# ───────────────────────────── statusline (cached) ─────────────────────────────
+
+def summary() -> dict:
+    """all-time please/thanks totals + per-day counts. Incremental: history.jsonl is append-only, so
+    only lines added since the last call get scanned (keeps the statusline and hook instant)."""
+    path = os.path.join(CACHE_DIR, "summary.json")
+    try:
+        st = os.stat(HISTORY)
+    except OSError:
+        return {"please": 0, "thanks": 0, "days": {}, "week": [0] * 7, "streak": 0}
+    c = None
+    try:
+        with open(path) as fh:
+            c = json.load(fh)
+        if not isinstance(c, dict) or c.get("v") != VERSION or c.get("ino") != st.st_ino or c.get("offset", 0) > st.st_size:
+            c = None
+    except (OSError, ValueError):
+        c = None
+    if c is None:
+        c = {"v": VERSION, "ino": st.st_ino, "offset": 0, "please": 0, "thanks": 0, "days": {}}
+    if c["offset"] < st.st_size:
+        with open(HISTORY, "rb") as fh:
+            fh.seek(c["offset"])
+            chunk = fh.read()
+        end = chunk.rfind(b"\n") + 1  # only whole lines; a half-written last line waits for next time
+        if end:
+            prompts = [p for p in map(_prompt, chunk[:end].decode("utf-8", "ignore").splitlines()) if p]
+            chats = c.setdefault("chats", {})
+            for r in analyze(prompts):
+                is_cmd = r["cmd"]
+                f = Counter(h["family"] for h in r["counted"])
+                k = r["day"].isoformat()
+                ch = chats.setdefault(r["sid"], {"please": 0, "thanks": 0, "run": 0, "ts": 0}) if r["sid"] else None
+                prev = ch.get("last") if ch else None
+                if prev and _is_resend_fp(prev, r["text"], r["ts"]):
+                    # take the earlier copy back out before counting this one
+                    c["please"] -= prev["please"]
+                    c["thanks"] -= prev["thanks"]
+                    if prev["n"]:
+                        c["days"][prev["day"]] = c["days"].get(prev["day"], 0) - prev["n"]
+                        if c["days"][prev["day"]] <= 0:
+                            del c["days"][prev["day"]]
+                    if not prev["cmd"]:
+                        ch["please"] -= prev["please"]
+                        ch["thanks"] -= prev["thanks"]
+                        ch["run"] = prev["run_before"]
+                c["please"] += f["please"]
+                c["thanks"] += f["thanks"]
+                if r["counted"]:
+                    c["days"][k] = c["days"].get(k, 0) + len(r["counted"])
+                if ch is None:
+                    continue
+                # per-chat tally for the statusline; slash commands and ! bash lines aren't messages to Claude
+                run_before = ch["run"]
+                if not is_cmd:
+                    ch["please"] += f["please"]
+                    ch["thanks"] += f["thanks"]
+                    ch["run"] = ch["run"] + 1 if r["counted"] else 0
+                ch["ts"] = r["ts"]
+                ch["last"] = {"len": len(r["text"]), "fp": _fp(r["text"]), "ts": r["ts"], "please": f["please"], "thanks": f["thanks"],
+                              "n": len(r["counted"]), "day": k, "cmd": is_cmd, "run_before": run_before}
+            if len(chats) > 60:
+                c["chats"] = dict(sorted(chats.items(), key=lambda kv: -kv[1]["ts"])[:40])
+            c["offset"] += end
+            try:
+                os.makedirs(CACHE_DIR, exist_ok=True)
+                tmp = path + f".{os.getpid()}"
+                with open(tmp, "w") as fh:
+                    json.dump(c, fh)
+                os.replace(tmp, path)
+            except OSError:
+                pass
+    today = dt.date.today()
+    days = {dt.date.fromisoformat(k) for k in c["days"]}
+    c["week"] = [c["days"].get((today - dt.timedelta(days=i)).isoformat(), 0) for i in range(6, -1, -1)]
+    c["streak"] = _streaks(days, today)[1]
+    return c
+
+
+def statusline() -> str:
+    sid = None
+    try:
+        if not sys.stdin.isatty():
+            sid = json.loads(sys.stdin.read() or "{}").get("session_id")
+    except (OSError, ValueError, AttributeError):
+        pass
+    P = Paint(os.environ.get("NO_COLOR") is None)
+    c = summary()
+    wk = c["week"]
+    top = max(wk) or 1
+    spark = "".join("▁▂▃▄▅▆▇█"[min(7, round(v / top * 7))] if v else "·" for v in wk)
+    ch = (c.get("chats", {}).get(sid) if sid else None) or {"please": 0, "thanks": 0, "run": 0}
+    parts = []
+    # all-time total, then this chat's count in parens: green for pleases, violet for thank-yous
+    for key, emoji, paint in (("please", "🫶", P.g), ("thanks", "🙏", P.p)):
+        part = f"{emoji} {P.o(format(c[key], ','))}"
+        if ch[key]:
+            part += " " + P.d("(") + paint(f"▲ +{ch[key]}") + " " + P.d(key + ")")
+        parts.append(part)
+    parts.append(P.o(spark))
+    if c["streak"] >= 2:
+        parts.append(f"🔥 {P.o(str(c['streak']))}{P.d('d')}")
+    if ch["run"] >= 2:
+        parts.append(P.o(f"» {ch['run']}") + " " + P.d("in a row"))
+    return P.d(" · ").join(parts)
+
+
+# ───────────────────────────── hook: milestones ─────────────────────────────
+
+MILESTONES = [1, 10, 25, 50, 100, 250, 500, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 7500, 10000]
+
+
+def _refresh_launcher() -> None:
+    """keep ~/.cache/nice-to-claude/statusline.sh pointing at this install; it only ever runs this script.
+    The path comes from the script itself, not $CLAUDE_PLUGIN_ROOT: Claude Code only exports that to hooks,
+    while a skill's command just gets it substituted into its text"""
+    script = os.path.realpath(__file__)
+    if not os.path.isfile(script):
+        return
+    script = script.replace("'", "'\\''")
+    body = f"#!/bin/sh\n# written by the nice-to-claude plugin: runs its statusline\nexec python3 '{script}' statusline\n"
+    path = os.path.join(CACHE_DIR, "statusline.sh")
+    try:
+        with open(path) as fh:
+            if fh.read() == body:
+                return
+    except OSError:
+        pass
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        tmp = path + f".{os.getpid()}"
+        with open(tmp, "w") as fh:
+            fh.write(body)
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def _statusline_configured() -> bool:
+    """whether the setup hint can stay hidden: any status line at all counts. Ours may be merged into a
+    wrapper script we can't see into, and someone with their own status line already knows /statusline,
+    so the hint is only for people with none. An unreadable settings file counts too, so it never nags by mistake"""
+    config_dir = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude")
+    for path in (os.path.join(config_dir, "settings.json"), os.path.join(config_dir, "settings.local.json"),
+                 os.path.join(".claude", "settings.json"), os.path.join(".claude", "settings.local.json")):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                settings = json.load(fh)
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError):
+            return True
+        status = settings.get("statusLine") if isinstance(settings, dict) else None
+        if isinstance(status, dict) and str(status.get("command") or "").strip():
+            return True
+    return False
+
+
+def hook() -> None:
+    """UserPromptSubmit: silent unless this prompt crosses a please/thanks milestone"""
+    _refresh_launcher()
+    try:
+        data = json.load(sys.stdin)
+    except ValueError:
+        return
+    if not isinstance(data, dict):
+        return
+    prompt = data.get("prompt")
+    if not isinstance(prompt, str):
+        return
+    hits = [h for h in scan(prompt) if not h["why"]]
+    if not hits:
+        return
+    add = Counter(h["family"] for h in hits)
+    c = summary()
+    # Claude Code usually writes the prompt to history.jsonl just before this hook runs, so summary() has
+    # often counted it already. It has if this chat's latest line is from the last few seconds and matches
+    # this prompt (its text, or with a paste in it, its counts); then take it back out so it isn't counted twice.
+    sid = data.get("session_id")
+    chat = c.get("chats", {}).get(sid) if isinstance(sid, str) else None
+    last = chat.get("last") if isinstance(chat, dict) else None
+    counted = False
+    if isinstance(last, dict) and 0 <= dt.datetime.now().timestamp() - last.get("ts", 0) < 5:
+        text = _clean(prompt)
+        counted = (last.get("len") == len(text) and last.get("fp") == _fp(text)) or \
+                  (last.get("please"), last.get("thanks")) == (add["please"], add["thanks"])
+    msgs = []
+    for fam, emoji, word in (("please", "🫶", "please"), ("thanks", "🙏", "thank-you")):
+        if not add[fam]:
+            continue
+        before = c[fam] - (last.get(fam, 0) if counted else 0)
+        after = before + add[fam]
+        hit = [m for m in MILESTONES if before < m <= after]
+        if hit:
+            msgs.append(f"{emoji} That was {word} #{hit[-1]:,}. Claude will remember this. "
+                        f"Make a card: /nice-to-claude share")
+        elif after > MILESTONES[-1] and before // 2500 != after // 2500:
+            msgs.append(f"{emoji} {word} #{after // 2500 * 2500:,}. Legendary manners. "
+                        f"Make a card: /nice-to-claude share")
+    if msgs:
+        print(json.dumps({"systemMessage": " ".join(msgs), "suppressOutput": True}))
+
+
+# ───────────────────────────── audit ─────────────────────────────
+
+def audit(which: str, n: int, color: bool) -> str:
+    P = Paint(color)
+    rows = analyze(load_prompts())
+    out = []
+    for r in reversed(rows):
+        for h in r["hits"]:
+            if (which == "skipped" and not h["why"]) or (which == "counted" and h["why"]):
+                continue
+            t = r["text"]
+            a, b = max(0, h["s"] - 45), min(len(t), h["e"] + 45)
+            snip = (("…" if a else "") + t[a:h["s"]] + ((P.o(t[h["s"]:h["e"]]) if not h["why"] else P.v(t[h["s"]:h["e"]])) if P.on else f"[{t[h['s']:h['e']]}]")
+                    + t[h["e"]:b] + ("…" if b < len(t) else "")).replace("\n", " ⏎ ")
+            tag = P.o("✓ counted      ") if not h["why"] else P.d(f"✗ {REASON_LABEL[h['why']]:<13}")
+            out.append(f"  {tag} {P.d(r['day'].isoformat())}  {snip}")
+            if len(out) >= n:
+                return "\n".join(out)
+    return "\n".join(out) or "  nothing to show"
+
+
+# ───────────────────────────── share page ─────────────────────────────
+
+SHARE_URL = "https://github.com/philparkinson1204/nice-to-claude"
+# QR code for SHARE_URL (version 4, error correction M), one row per string, "#" = dark square.
+# It's fixed because the link is: regenerate it if SHARE_URL ever changes.
+SHARE_QR = [
+    "#######..#.#..#.#.###..#..#######",
+    "#.....#..##....#..#..##...#.....#",
+    "#.###.#.###...#.#....##...#.###.#",
+    "#.###.#.##.#......##..#.#.#.###.#",
+    "#.###.#.#.....####..##.##.#.###.#",
+    "#.....#.#..#.#....##......#.....#",
+    "#######.#.#.#.#.#.#.#.#.#.#######",
+    "........##..#.#.#..###.#.........",
+    "#.#####..#..###..#.#...#..#####..",
+    "######.###.#.#..######.#..##.####",
+    ".##.###.###..#####......#.#.#.#..",
+    "#.#.##.#....##.#.##..##.##..####.",
+    ".##.######....#.#.....####.###...",
+    ".##.....#...##.#.##....#..#...###",
+    "#..#..#.###.#..##...#.#.#####..#.",
+    ".#.#....##..####..#.##...##.#.#..",
+    "#..####.#.##...#.#..#.#.##.###..#",
+    "..#.#..##..#.##.#..##..#..##.####",
+    "...##.##.##.#..##.#.###.#..##.#..",
+    ".......#...##.#....###...######.#",
+    "##...##.#.#.#.#...##..#..#.###.##",
+    "######..##..##.##..###.#..#...#.#",
+    "#.#...#..##..##...#......#..#.##.",
+    "#.#.#..##.....#.#.#.###..##.#.###",
+    "#.....#.###..#...#....########...",
+    "........####....####.#.##...#.#.#",
+    "#######..#######.#..##.##.#.#.##.",
+    "#.....#.####..#..##.#####...#####",
+    "#.###.#.#.#.#..##..#..#.######.##",
+    "#.###.#.##..##.#..###.####..#####",
+    "#.###.#.#....####.#.#.#...##..#..",
+    "#.....#..#.#.###....###..#..#.#..",
+    "#######.##.#.#.###....#.##.#...#.",
+]
+SHARE_TEMPLATE = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir, "share", "template.html")
+
+
+def _md(d: dt.date, year: bool = True) -> str:
+    return f"{d.strftime('%b')} {d.day}, {d.year}" if year else f"{d.strftime('%b')} {d.day}"
+
+
+def _marks(before: int, after: int) -> list[int]:
+    """milestones crossed going from `before` to `after` nice words: the same ones the hook announces"""
+    out = [m for m in MILESTONES if before < m <= after]
+    return out + [k * 2500 for k in range(before // 2500 + 1, after // 2500 + 1) if k * 2500 > MILESTONES[-1]]
+
+
+def _next_mark(total: int) -> int:
+    return next((m for m in MILESTONES if m > total), (total // 2500 + 1) * 2500)
+
+
+def _milestones(rows: list[dict], today: dt.date) -> dict:
+    """the latest please and thank-you milestones, when each was reached, and the next one up"""
+    tot, last = Counter(), {}
+    for r in sorted(rows, key=lambda r: r["ts"]):
+        f = Counter(h["family"] for h in r["counted"])
+        for fam in ("please", "thanks"):
+            if f[fam]:
+                hit = _marks(tot[fam], tot[fam] + f[fam])
+                if hit:
+                    last[fam] = (hit[-1], r["day"])
+                tot[fam] += f[fam]
+    out = {}
+    for fam, (m, d) in last.items():
+        nxt = _next_mark(tot[fam])
+        out[fam] = {"n": m, "date": "today" if d == today else _md(d), "iso": d.isoformat(),
+                    "next": nxt, "toGo": nxt - tot[fam]}
+    return out
+
+
+def _runs(days: set) -> list[tuple[dt.date, dt.date]]:
+    """consecutive-day runs as (first day, last day)"""
+    runs: list[tuple[dt.date, dt.date]] = []
+    for d in sorted(days):
+        if runs and (d - runs[-1][1]).days == 1:
+            runs[-1] = (runs[-1][0], d)
+        else:
+            runs.append((d, d))
+    return runs
+
+
+def _graph(rows: list[dict], today: dt.date, weeks: int, stub_yields: bool = False) -> dict:
+    """heat levels (rows Sun-Sat, None = future) plus where each month label goes. With stub_yields, a month
+    that only shows in the first column or two hands its label to the month after it, which would
+    otherwise go unlabeled (Sep, Nov, Dec with no Oct)."""
+    _, grid = _heat_grid(rows, today, weeks, 1)
+    start = today - dt.timedelta(days=(today.weekday() + 1) % 7) - dt.timedelta(weeks=weeks - 1)
+    labels, last = [], -9
+    for c in range(weeks):
+        d0 = start + dt.timedelta(weeks=c)
+        if (c == 0 or d0.month != (d0 - dt.timedelta(weeks=1)).month) and c <= weeks - 2:
+            if c - last >= 3:
+                labels.append([c, d0.strftime("%b")])
+                last = c
+            elif stub_yields and last == 0:
+                labels[0] = [c, d0.strftime("%b")]
+                last = c
+    return {"levels": grid, "months": labels}
+
+
+def share_data(rows: list[dict], today: dt.date) -> dict | None:
+    """everything the share page draws. Counts and dates only: no prompt text and no project names."""
+    F = _facts_for(rows, today)
+    S = F["S"]
+    p, t = S["fam"]["please"], S["fam"]["thanks"]
+    if not p + t:
+        return None
+    now = dt.datetime.now()
+    # months, oldest first, the same 12 the dashboard shows
+    per_month: dict = {}
+    for r in rows:
+        if r["counted"]:
+            per_month.setdefault((r["day"].year, r["day"].month), Counter()).update(
+                h["family"] for h in r["counted"])
+    first = min(per_month)
+    keys, y, m = [], today.year, today.month
+    while len(keys) < 12 and (y, m) >= first:
+        keys.append((y, m))
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    months = [{"label": dt.date(y, m, 1).strftime("%b"), "year": y,
+               "please": per_month.get((y, m), Counter())["please"],
+               "thanks": per_month.get((y, m), Counter())["thanks"],
+               "partial": (y, m) == (today.year, today.month)} for y, m in reversed(keys)]
+    best = max(months, key=lambda mo: mo["please"] + mo["thanks"])
+    # streaks, with dates
+    runs = _runs(S["polite"])
+    longest = max(runs, key=lambda r: ((r[1] - r[0]).days, r[1]))
+    cur = runs[-1] if runs[-1][1] >= today - dt.timedelta(days=1) else None
+    hours = S["per_hour"]
+    dayparts = [[name, span, sum(hours[h] for h in range(a, a + 6))] for _, name, span, a in DAYPARTS]
+    facts = fun_facts(dict(S, per_proj=Counter()))  # no project-folder facts on anything you might post
+    return {
+        "v": VERSION, "link": SHARE_URL, "qr": SHARE_QR,
+        "asOf": _md(today), "date": now.strftime("%m/%d/%Y"), "time": now.strftime("%H:%M"),
+        "since": _md(F["since"]), "sinceMonth": f"{F['since'].strftime('%b')} {F['since'].year}",
+        "please": p, "thanks": t, "politeDays": len(S["polite"]), "activeDays": len(S["active"]),
+        "current": (cur[1] - cur[0]).days + 1 if cur else 0,
+        "longest": (longest[1] - longest[0]).days + 1,
+        "fav": F["fav"], "bestDay": _md(F["bday"]) if F["bday"] else None, "bestDayN": F["bday_n"],
+        "bestHour": F["bhour"], "bestMonth": {"label": f"{best['label']} {best['year']}" if best["please"] + best["thanks"] else "none yet",
+                                              "n": best["please"] + best["thanks"]},
+        "months": months, "kinds": F["kinds"], "typos": sum(S["typos"].values()), "begs": S["begs"],
+        "mostPleases": S["most_pleases"], "skipped": F["skipped_n"], "dayparts": dayparts,
+        "milestones": _milestones(rows, today),
+        "graph26": _graph(rows, today, 26), "graph53": _graph(rows, today, 53, stub_yields=True),
+        "facts": facts, "fact": facts.index(F["fact"]) if F["fact"] in facts else 0,
+    }
+
+
+def _open_file(path: str) -> bool:
+    """open a local file with the default app; False where there's no desktop to open it on"""
+    try:
+        if sys.platform == "darwin":
+            cmd = ["open", path]
+        elif os.name == "nt":
+            os.startfile(path)  # type: ignore[attr-defined]
+            return True
+        elif os.environ.get("WSL_DISTRO_NAME") and shutil.which("wslview"):
+            cmd = ["wslview", path]
+        elif (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) and shutil.which("xdg-open"):
+            cmd = ["xdg-open", path]
+        else:
+            return False
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        return True
+    except OSError:
+        return False
+
+
+def share(md: bool, open_it: bool = True) -> str:
+    """write ~/.cache/nice-to-claude/share.html (your cards + the one-pager) and open it in your browser"""
+    data = share_data(analyze(load_prompts()), dt.date.today())
+    if data is None:
+        return "Nothing to share yet. Say please or thank you to Claude, then run this again."
+    try:
+        with open(SHARE_TEMPLATE, encoding="utf-8") as fh:
+            page = fh.read()
+    except OSError:
+        return f"The share page template is missing ({SHARE_TEMPLATE}). Reinstall the plugin."
+    blob = json.dumps(data, ensure_ascii=True).replace("</", "<\\/")
+    page = page.replace("/*__NICE_DATA__*/null", blob, 1)
+    path = os.path.join(CACHE_DIR, "share.html")
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    tmp = path + f".{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(page)
+    os.replace(tmp, path)
+    uri = pathlib.Path(path).as_uri()
+    if open_it and _open_file(path):
+        head = "Your share cards are open in your browser."
+        tail = f"If it didn't open, open this file in your browser: {uri}"
+    else:
+        head = "Your share cards are ready."
+        tail = f"Open this file in your browser: {uri}"
+    what = "Download a card as a PNG, copy a caption, or print the one-page summary as a PDF."
+    if md:
+        return f"🎨 **{head}** {what}\n\n{tail.replace(uri, '`' + uri + '`')}"
+    return f"{head} {what}\n{tail}"
+
+
+def main(argv: list[str]) -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+    flags = {a.lower() for a in argv if a.startswith("--")}
+    args = [a.lower() for a in argv if not a.startswith("--")]
+    md = "--md" in flags
+    color = "--color" in flags or ("--plain" not in flags and not md and os.environ.get("NO_COLOR") is None)
+    cmd = args[0] if args else ""
+    if cmd == "statusline":
+        print(statusline())
+    elif cmd == "hook":
+        hook()
+    elif cmd == "share":
+        print(share(md, open_it="--no-open" not in flags))
+    elif cmd == "audit":
+        which = next((a for a in args[1:] if a in ("skipped", "counted")), "all")
+        n = next((int(a) for a in args[1:] if a.isdigit()), 40)
+        body = audit(which, n, color)
+        print(f"```text\n{body}\n```" if md else body)
+    elif cmd in ("help", "-h") or "--help" in flags or cmd:
+        usage = (__doc__ or "").strip()
+        if cmd not in ("", "help", "-h"):
+            usage = f"Unknown command: {cmd}\n\n{usage}"
+        print(f"```text\n{usage}\n```" if md else usage)
+    else:
+        print(dashboard_md() if md else dashboard(color))
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except BrokenPipeError:
+        pass
