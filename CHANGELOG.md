@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3
+
+- Moved the complete, human-readable Python implementation from `bin/nice-to-claude` to non-executable `scripts/nice_to_claude.py`. No executable files are shipped in `bin/`.
+- The command skill and `UserPromptSubmit` hook explicitly invoke the source with `python3`, so the dashboard, milestones, statusline and share page keep working.
+- Updated installation notes and direct-script instructions. No dependencies or install-time downloads were added.
+
 ## 1.0.2
 
 - Opening `/nice-to-claude` now really creates the statusline launcher, even with hooks turned off. The script finds its own path instead of relying on `$CLAUDE_PLUGIN_ROOT`, which Claude Code doesn't give a skill's commands.
